@@ -79,3 +79,17 @@ Implement the task according to the technical specification and general engineer
 <!-- chat-id: 596cace5-1960-4ffc-a7bf-b4d04fb69e0b -->
 
 推送项目到github, 默认公开 ，名称对应。
+
+### [x] Step: 修改部分问题后重新推送
+<!-- chat-id: 451dc6af-05fd-45a3-99dd-b8590e600bd2 -->
+
+我们希望在后台填写 ai api 密匙，和baseurl, 和wordpress 相关
+自动构建时就 生成admin_session_secret - 管理员会话密钥
+
+我们环境变量只配置  后台密码和  数据库。
+
+目前会因为环境变量缺失构建失败，修复后重新推送 。
+
+### [ ] Step: wordpress seo 插件配置修改
+
+系统默认时其他的seo 插件，但是我们使用 的是 rank math seo 插件 的设置，修改配置后推送
