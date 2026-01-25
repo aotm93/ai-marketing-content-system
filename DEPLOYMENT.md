@@ -78,33 +78,19 @@ git push -u origin main
 
 In your application service settings, add the following environment variables:
 
-#### Required Variables
+#### Required Variables (Minimal Setup)
+
+**IMPORTANT**: Only these two variables are required for the application to build and start:
 
 ```bash
-# AI Provider Configuration
-PRIMARY_AI_PROVIDER=openai
-PRIMARY_AI_BASE_URL=https://api.openai.com/v1
-PRIMARY_AI_API_KEY=your_openai_api_key_here
-PRIMARY_AI_TEXT_MODEL=gpt-4o
-PRIMARY_AI_IMAGE_MODEL=dall-e-3
-
-# WordPress Configuration
-WORDPRESS_URL=https://your-wordpress-site.com
-WORDPRESS_USERNAME=your_wp_username
-WORDPRESS_PASSWORD=your_wp_app_password
-WORDPRESS_API_ENABLED=true
-
-# Admin Authentication
+# Admin Authentication (REQUIRED)
 ADMIN_PASSWORD=your_secure_admin_password_here
-ADMIN_SESSION_SECRET=your_random_secret_key_here_min_32_chars
-ADMIN_SESSION_EXPIRE_MINUTES=1440
 
-# System Configuration
-ENVIRONMENT=production
-LOG_LEVEL=INFO
-MAX_CONCURRENT_AGENTS=5
-CONTENT_GENERATION_TIMEOUT=600
+# Database will be auto-configured by Zeabur
+# DATABASE_URL is automatically set when you add PostgreSQL service
 ```
+
+**Note**: AI API keys and WordPress configuration can be set later through the admin panel UI after deployment.
 
 #### Auto-Configured by Zeabur
 
@@ -116,22 +102,40 @@ REDIS_URL=${REDIS_CONNECTION_STRING}
 PORT=${PORT}
 ```
 
-#### Optional Variables
+#### Optional Variables (Advanced Configuration)
+
+These can be set as environment variables OR configured through the admin panel:
 
 ```bash
-# Fallback AI Provider
-FALLBACK_AI_PROVIDER=custom
-FALLBACK_AI_BASE_URL=https://your-api.example.com/v1
-FALLBACK_AI_API_KEY=your_fallback_api_key_here
+# Session Configuration (auto-generated if not set)
+ADMIN_SESSION_SECRET=your_random_secret_key_here_min_32_chars
+ADMIN_SESSION_EXPIRE_MINUTES=1440
 
-# SEO Plugin
-SEO_PLUGIN=yoast
-SEO_API_KEY=your_seo_plugin_api_key
+# System Configuration
+ENVIRONMENT=production
+LOG_LEVEL=INFO
 
-# Keyword Research API
-KEYWORD_API_PROVIDER=dataforseo
-KEYWORD_API_KEY=your_keyword_api_key
+# Redis (optional - defaults to localhost)
+REDIS_URL=redis://localhost:6379/0
 ```
+
+#### Configure Through Admin Panel
+
+After deployment, log in to the admin panel to configure:
+
+1. **AI Provider Settings**
+   - Primary AI API key and base URL
+   - AI text and image models
+   - Fallback AI provider (optional)
+
+2. **WordPress Integration**
+   - WordPress site URL
+   - WordPress username and app password
+   - SEO plugin settings
+
+3. **Keyword Research API** (optional)
+   - Provider selection
+   - API key and base URL
 
 ### 6. Enable Automatic Deployment
 
