@@ -47,16 +47,18 @@ See [DEPLOYMENT.md](DEPLOYMENT.md) for detailed instructions.
 ### Prerequisites
 
 - Python 3.10+
-- Docker and Docker Compose
-- OpenAI API key (or compatible provider)
-- WordPress site with REST API enabled
+- PostgreSQL database
+- WordPress site with Rank Math SEO plugin
+- OpenAI API key (or compatible provider) - can be configured after deployment
 
-### Installation
+### Simplified Installation
+
+**New in v2.0**: Minimal configuration required! Only database and admin password needed to start.
 
 1. Clone the repository:
 ```bash
-git clone <repository-url>
-cd ai-marketing-system
+git clone https://github.com/aotm93/ai-marketing-content-system.git
+cd ai-marketing-content-system
 ```
 
 2. Copy environment template:
@@ -64,12 +66,11 @@ cd ai-marketing-system
 cp .env.example .env
 ```
 
-3. Configure your API keys in `.env`:
+3. Configure minimal required variables in `.env`:
 ```bash
-PRIMARY_AI_API_KEY=your_openai_api_key
-WORDPRESS_URL=https://your-site.com
-WORDPRESS_USERNAME=your_username
-WORDPRESS_PASSWORD=your_app_password
+# Only these two are required!
+DATABASE_URL=postgresql://user:password@localhost:5432/ai_marketing
+ADMIN_PASSWORD=your_secure_admin_password_here
 ```
 
 4. Start the system with Docker:
@@ -77,40 +78,38 @@ WORDPRESS_PASSWORD=your_app_password
 docker-compose up -d
 ```
 
-5. Access the API:
-```
-http://localhost:8000
-```
-
-6. Access the Admin Panel:
+5. Access the Admin Panel and configure AI/WordPress settings:
 ```
 http://localhost:8000/admin
 ```
 
+**Note**: AI API keys and WordPress configuration are now set through the admin panel UI, not environment variables!
+
 ## Admin Panel
 
-The system includes a secure web-based admin panel for managing configuration without directly editing files.
+The system includes a secure web-based admin panel for managing all configuration through a user-friendly interface.
 
 ### Admin Panel Features
 
 - **Password-Protected Access**: Simple password authentication with JWT tokens
-- **Configuration Management**: Update all system settings through a web interface
+- **Configuration Management**: Update AI, WordPress, and system settings through web interface
+- **Auto-Generated Secrets**: Session secrets are automatically generated if not provided
 - **Real-time Updates**: Changes are saved to `.env` file automatically
 - **Rate Limiting**: Protection against brute force attacks (5 login attempts per 5 minutes)
 - **Secure Sessions**: HTTP-only cookies with configurable expiration
 
 ### Admin Setup
 
-1. Set admin credentials in `.env`:
+1. Set admin password in `.env` (only required variable):
 ```bash
 ADMIN_PASSWORD=your_secure_password_here
-ADMIN_SESSION_SECRET=your_random_secret_key_min_32_chars
-ADMIN_SESSION_EXPIRE_MINUTES=1440  # 24 hours
 ```
 
-2. Generate a secure session secret:
+2. (Optional) Session secret auto-generates, but you can set your own:
 ```bash
-python -c "import secrets; print(secrets.token_urlsafe(32))"
+# Auto-generated if not set
+ADMIN_SESSION_SECRET=your_random_secret_key_min_32_chars
+ADMIN_SESSION_EXPIRE_MINUTES=1440  # 24 hours
 ```
 
 3. Access the admin panel at `http://localhost:8000/admin`
@@ -118,10 +117,11 @@ python -c "import secrets; print(secrets.token_urlsafe(32))"
 ### Admin Panel Usage
 
 1. **Login**: Enter your admin password to access the dashboard
-2. **View Configuration**: All current settings are loaded automatically
-3. **Update Settings**: Modify any configuration value in the form
-4. **Save Changes**: Click "Save All Changes" to persist updates
-5. **Restart**: Some changes require system restart to take full effect
+2. **Configure AI Provider**: Set your OpenAI API key, base URL, and models
+3. **Configure WordPress**: Set your WordPress URL, username, and app password
+4. **Configure SEO**: Verify Rank Math SEO plugin settings
+5. **Save Changes**: All changes are persisted automatically
+6. **Restart**: Some changes may require system restart to take full effect
 
 ### Security Features
 
@@ -133,30 +133,54 @@ python -c "import secrets; print(secrets.token_urlsafe(32))"
 
 ## Configuration
 
-### AI Provider Setup
+### Environment Variables
 
-The system supports any OpenAI-compatible API. Configure in `.env`:
+**Minimal Required Configuration:**
 
 ```bash
-# Primary Provider
-PRIMARY_AI_PROVIDER=openai
-PRIMARY_AI_BASE_URL=https://api.openai.com/v1
-PRIMARY_AI_API_KEY=your_key
-PRIMARY_AI_TEXT_MODEL=gpt-4o
-PRIMARY_AI_IMAGE_MODEL=dall-e-3
+# Required
+DATABASE_URL=postgresql://user:password@localhost:5432/ai_marketing
+ADMIN_PASSWORD=your_secure_admin_password_here
 
-# Fallback Provider (optional)
-FALLBACK_AI_PROVIDER=custom
-FALLBACK_AI_BASE_URL=https://your-api.com/v1
-FALLBACK_AI_API_KEY=your_key
+# Optional (auto-generated if not set)
+ADMIN_SESSION_SECRET=auto_generated_on_startup
 ```
+
+**All other settings are configured through the admin panel UI.**
+
+### AI Provider Setup
+
+Configure through the admin panel after deployment:
+
+1. Log in to admin panel at `/admin`
+2. Navigate to AI Provider settings
+3. Enter your configuration:
+   - Provider: OpenAI (or compatible)
+   - Base URL: `https://api.openai.com/v1`
+   - API Key: Your OpenAI API key
+   - Text Model: `gpt-4o`
+   - Image Model: `dall-e-3`
+4. (Optional) Configure fallback provider
+5. Save changes
 
 ### WordPress Setup
 
-1. Install Rank Math SEO plugin (or Yoast SEO/AIOSEO as alternatives)
-2. Enable REST API
-3. Create application password
-4. Configure in `.env`
+**This system uses Rank Math SEO plugin by default.**
+
+1. Install and activate Rank Math SEO plugin on your WordPress site
+2. Enable WordPress REST API (enabled by default)
+3. Create an application password:
+   - Go to WordPress Admin → Users → Profile
+   - Scroll to "Application Passwords"
+   - Create new password named "AI Marketing System"
+   - Copy the generated password
+4. Configure in admin panel:
+   - WordPress URL: `https://your-site.com`
+   - Username: Your WordPress username
+   - Password: The application password from step 3
+   - SEO Plugin: `rankmath` (default)
+
+For detailed Rank Math SEO setup instructions, see [docs/WORDPRESS_RANKMATH_SETUP.md](docs/WORDPRESS_RANKMATH_SETUP.md)
 
 ## Usage
 

@@ -131,7 +131,8 @@ After deployment, log in to the admin panel to configure:
 2. **WordPress Integration**
    - WordPress site URL
    - WordPress username and app password
-   - SEO plugin settings
+   - SEO plugin settings (Rank Math SEO)
+   - **Note**: Make sure Rank Math SEO plugin is installed and activated on your WordPress site
 
 3. **Keyword Research API** (optional)
    - Provider selection
