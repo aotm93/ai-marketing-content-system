@@ -75,7 +75,7 @@ Implement the task according to the technical specification and general engineer
 
 我们通过项目推送到github 进行管理，GitHub 会自动触发  我们的zeabur 的服务器进行部署或者更新的方式。确定整个项目符合条件。
 
-### [ ] Step: 推送 第一个版本到github
+### [x] Step: 推送 第一个版本到github
 <!-- chat-id: 596cace5-1960-4ffc-a7bf-b4d04fb69e0b -->
 
 推送项目到github, 默认公开 ，名称对应。
