@@ -153,7 +153,7 @@ FALLBACK_AI_API_KEY=your_key
 
 ### WordPress Setup
 
-1. Install Yoast SEO or AIOSEO plugin
+1. Install Rank Math SEO plugin (or Yoast SEO/AIOSEO as alternatives)
 2. Enable REST API
 3. Create application password
 4. Configure in `.env`

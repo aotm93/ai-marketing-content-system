@@ -44,7 +44,7 @@ class Settings(BaseSettings):
     wordpress_api_enabled: bool = True
 
     # SEO Plugin
-    seo_plugin: str = "yoast"
+    seo_plugin: str = "rankmath"
     seo_api_key: Optional[str] = None
 
     # Keyword Research

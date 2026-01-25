@@ -146,7 +146,7 @@ The system uses an **Orchestrator-Specialist Pattern** with autonomous agents th
 
 **Responsibilities**:
 - Publishes content to WordPress
-- Sets SEO metadata (Yoast/AIOSEO)
+- Sets SEO metadata (Rank Math/Yoast/AIOSEO)
 - Schedules content strategically
 - Monitors publication success
 
@@ -285,7 +285,7 @@ Content ready → Media Creator Agent:
 ```
 All assets ready → Publish Manager Agent:
 1. Publishes content to WordPress
-2. Sets SEO metadata via Yoast/AIOSEO API
+2. Sets SEO metadata via Rank Math/Yoast/AIOSEO API
 3. Schedules strategically (best times for traffic)
 4. Monitors publication success
 5. Reports performance to Orchestrator
@@ -493,7 +493,7 @@ Based on research, successful AI content systems achieve:
    - Define key product attributes
 
 3. **Set Up WordPress**
-   - Install Yoast SEO or AIOSEO
+   - Install Rank Math SEO (or Yoast SEO/AIOSEO as alternatives)
    - Configure REST API access
    - Create staging environment
 

@@ -159,7 +159,7 @@ The system is ready for:
 
 1. **WordPress Integration**
    - Complete WordPress REST API client
-   - Yoast/AIOSEO plugin integration
+   - Rank Math/Yoast/AIOSEO plugin integration
    - Media upload functionality
 
 2. **Keyword Research APIs**

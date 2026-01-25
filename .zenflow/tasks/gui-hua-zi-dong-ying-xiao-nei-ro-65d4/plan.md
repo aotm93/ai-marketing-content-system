@@ -91,5 +91,6 @@ Implement the task according to the technical specification and general engineer
 目前会因为环境变量缺失构建失败，修复后重新推送 。
 
 ### [ ] Step: wordpress seo 插件配置修改
+<!-- chat-id: f4780ad3-8a71-41c9-925e-8e68e6e7d6ef -->
 
 系统默认时其他的seo 插件，但是我们使用 的是 rank math seo 插件 的设置，修改配置后推送
