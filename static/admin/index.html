@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Marketing System - Admin Panel</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <!-- Login Screen -->
+    <div id="loginScreen" class="screen active">
+        <div class="login-container">
+            <div class="login-box">
+                <h1>🔐 Admin Login</h1>
+                <p class="subtitle">AI Marketing Content System</p>
+                <form id="loginForm">
+                    <div class="form-group">
+                        <label for="password">Password</label>
+                        <input type="password" id="password" name="password" required autocomplete="current-password">
+                    </div>
+                    <button type="submit" class="btn btn-primary">Login</button>
+                    <div id="loginError" class="error-message"></div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Admin Dashboard -->
+    <div id="dashboardScreen" class="screen">
+        <nav class="navbar">
+            <div class="nav-brand">
+                <h2>AI Marketing System</h2>
+            </div>
+            <div class="nav-actions">
+                <span id="adminStatus" class="status-badge">Admin</span>
+                <button id="logoutBtn" class="btn btn-secondary">Logout</button>
+            </div>
+        </nav>
+
+        <div class="container">
+            <div class="dashboard-header">
+                <h1>Configuration Management</h1>
+                <p>Manage your AI marketing system settings</p>
+            </div>
+
+            <div id="messageBox" class="message-box"></div>
+
+            <!-- Configuration Sections -->
+            <div class="config-sections">
+                <!-- AI Provider Configuration -->
+                <div class="config-section">
+                    <h3>🤖 Primary AI Provider</h3>
+                    <div class="config-grid">
+                        <div class="config-item">
+                            <label>Provider Name</label>
+                            <input type="text" id="PRIMARY_AI_PROVIDER" class="config-input">
+                        </div>
+                        <div class="config-item">
+                            <label>Base URL</label>
+                            <input type="text" id="PRIMARY_AI_BASE_URL" class="config-input">
+                        </div>
+                        <div class="config-item">
+                            <label>API Key</label>
+                            <input type="password" id="PRIMARY_AI_API_KEY" class="config-input">
+                        </div>
+                        <div class="config-item">
+                            <label>Text Model</label>
+                            <input type="text" id="PRIMARY_AI_TEXT_MODEL" class="config-input">
+                        </div>
+                        <div class="config-item">
+                            <label>Image Model</label>
+                            <input type="text" id="PRIMARY_AI_IMAGE_MODEL" class="config-input">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Fallback AI Provider -->
+                <div class="config-section">
+                    <h3>🔄 Fallback AI Provider (Optional)</h3>
+                    <div class="config-grid">
+                        <div class="config-item">
+                            <label>Provider Name</label>
+                            <input type="text" id="FALLBACK_AI_PROVIDER" class="config-input">
+                        </div>
+                        <div class="config-item">
+                            <label>Base URL</label>
+                            <input type="text" id="FALLBACK_AI_BASE_URL" class="config-input">
+                        </div>
+                        <div class="config-item">
+                            <label>API Key</label>
+                            <input type="password" id="FALLBACK_AI_API_KEY" class="config-input">
+                        </div>
+                        <div class="config-item">
+                            <label>Text Model</label>
+                            <input type="text" id="FALLBACK_AI_TEXT_MODEL" class="config-input">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- WordPress Configuration -->
+                <div class="config-section">
+                    <h3>📝 WordPress Configuration</h3>
+                    <div class="config-grid">
+                        <div class="config-item">
+                            <label>WordPress URL</label>
+                            <input type="text" id="WORDPRESS_URL" class="config-input">
+                        </div>
+                        <div class="config-item">
+                            <label>Username</label>
+                            <input type="text" id="WORDPRESS_USERNAME" class="config-input">
+                        </div>
+                        <div class="config-item">
+                            <label>Password</label>
+                            <input type="password" id="WORDPRESS_PASSWORD" class="config-input">
+                        </div>
+                        <div class="config-item">
+                            <label>SEO Plugin</label>
+                            <select id="SEO_PLUGIN" class="config-input">
+                                <option value="yoast">Yoast SEO</option>
+                                <option value="aioseo">All in One SEO</option>
+                            </select>
+                        </div>
+                        <div class="config-item">
+                            <label>SEO API Key</label>
+                            <input type="password" id="SEO_API_KEY" class="config-input">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Keyword Research API -->
+                <div class="config-section">
+                    <h3>🔍 Keyword Research API (Optional)</h3>
+                    <div class="config-grid">
+                        <div class="config-item">
+                            <label>Provider</label>
+                            <input type="text" id="KEYWORD_API_PROVIDER" class="config-input">
+                        </div>
+                        <div class="config-item">
+                            <label>API Key</label>
+                            <input type="password" id="KEYWORD_API_KEY" class="config-input">
+                        </div>
+                        <div class="config-item">
+                            <label>Base URL</label>
+                            <input type="text" id="KEYWORD_API_BASE_URL" class="config-input">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- System Configuration -->
+                <div class="config-section">
+                    <h3>⚙️ System Configuration</h3>
+                    <div class="config-grid">
+                        <div class="config-item">
+                            <label>Log Level</label>
+                            <select id="LOG_LEVEL" class="config-input">
+                                <option value="DEBUG">DEBUG</option>
+                                <option value="INFO">INFO</option>
+                                <option value="WARNING">WARNING</option>
+                                <option value="ERROR">ERROR</option>
+                            </select>
+                        </div>
+                        <div class="config-item">
+                            <label>Max Concurrent Agents</label>
+                            <input type="number" id="MAX_CONCURRENT_AGENTS" class="config-input">
+                        </div>
+                        <div class="config-item">
+                            <label>Content Generation Timeout (seconds)</label>
+                            <input type="number" id="CONTENT_GENERATION_TIMEOUT" class="config-input">
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="action-buttons">
+                <button id="saveAllBtn" class="btn btn-primary btn-large">💾 Save All Changes</button>
+                <button id="refreshBtn" class="btn btn-secondary">🔄 Refresh Configuration</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
