@@ -385,7 +385,7 @@ class JobRunner:
                 "max_retries": self.config.max_retries
             }
         }
-    
+
     def get_history(self, limit: int = 20) -> List[Dict[str, Any]]:
         """Get recent job execution history"""
         return [job.to_dict() for job in self.job_history[-limit:]]

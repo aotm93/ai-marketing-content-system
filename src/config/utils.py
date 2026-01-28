@@ -1,4 +1,5 @@
 from sqlalchemy.orm import Session
+from sqlalchemy import inspect
 from src.models.config import SystemConfig
 from src.config.settings import settings
 import logging
@@ -8,7 +9,9 @@ logger = logging.getLogger(__name__)
 def load_settings_from_db(db: Session):
     """Load settings from database and update the global settings object"""
     try:
-        if not db.bind.dialect.has_table(db.bind, "system_config"):
+        # SQLAlchemy 2.x compatible way to check if table exists
+        inspector = inspect(db.bind)
+        if not inspector.has_table("system_config"):
             logger.warning("System config table does not exist yet. Skipping DB config load.")
             return
 

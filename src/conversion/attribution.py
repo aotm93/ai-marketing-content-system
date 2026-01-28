@@ -121,9 +121,7 @@ class Lead:
 
 
 from sqlalchemy.orm import Session
-from src.models.conversion import ConversionEventModel, LeadModel, ConversionEventType as DBEventType
-import json
-import uuid
+from src.models.conversion import ConversionEventModel, LeadModel
 
 class ConversionTracker:
     """

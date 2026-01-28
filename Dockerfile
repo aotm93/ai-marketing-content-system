@@ -14,6 +14,13 @@ COPY requirements.txt .
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Install Node.js and Build Dashboard (Multi-stage build is better, but this is simpler for single Dockerfile)
+RUN apt-get update && apt-get install -y nodejs npm
+COPY src/dashboard ./src/dashboard
+WORKDIR /app/src/dashboard
+RUN npm install && npm run build
+WORKDIR /app
+
 # Copy application code
 COPY . .
 

@@ -50,7 +50,16 @@ REDIS_URL=...
 
 ## Deployment Steps
 
-1. **Build Container**
+1. **Build Dashboard UI**
+   The Next.js dashboard needs to be built and exported before the container handles it.
+   ```bash
+   cd src/dashboard
+   npm install
+   npm run build
+   cd ../..
+   ```
+
+2. **Build Container**
    ```bash
    docker build -t ai-marketing-system .
    ```

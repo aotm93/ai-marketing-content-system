@@ -15,7 +15,6 @@ Defines reusable page components for pSEO:
 from typing import Dict, Any, List, Optional
 from dataclasses import dataclass, field
 from enum import Enum
-import json
 
 
 class ComponentType(str, Enum):

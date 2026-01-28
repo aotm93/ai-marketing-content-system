@@ -47,6 +47,7 @@ class Settings(BaseSettings):
     # Keyword Research
     keyword_api_provider: Optional[str] = None
     keyword_api_key: Optional[str] = None
+    keyword_api_username: Optional[str] = None  # Added for DataForSEO (Email)
     keyword_api_base_url: Optional[str] = None
 
     # System

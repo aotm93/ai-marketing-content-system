@@ -10,8 +10,7 @@ Records every job execution with:
 - Retry count
 """
 
-from sqlalchemy import Column, Integer, String, Text, DateTime, JSON, Enum as SQLEnum, Float, Boolean
-from datetime import datetime
+from sqlalchemy import Column, Integer, String, Text, DateTime, JSON, Enum as SQLEnum, Float
 from enum import Enum
 from typing import Dict, Any, Optional
 

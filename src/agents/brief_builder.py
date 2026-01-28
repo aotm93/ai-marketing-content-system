@@ -12,7 +12,6 @@ Generates structured content briefs based on opportunity analysis:
 import logging
 from typing import Dict, Any, List, Optional
 from dataclasses import dataclass, field
-import json
 
 from .base_agent import BaseAgent
 

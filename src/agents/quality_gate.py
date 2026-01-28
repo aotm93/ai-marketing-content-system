@@ -11,9 +11,8 @@ Features:
 """
 
 import logging
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Dict, Any, List, Optional
 from dataclasses import dataclass
-import hashlib
 from difflib import SequenceMatcher
 import re
 

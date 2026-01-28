@@ -66,6 +66,10 @@
                 <div class="config-section">
                     <h3>🤖 Primary AI Provider</h3>
                     <div class="config-grid">
+                        <p style="grid-column: span 3; color: #666; font-size: 0.9em; margin-bottom: 15px;">
+                            The main brain of the system. Handles high-quality content generation, complex decision
+                            making, and article writing. (Recommended: GPT-4o or Claude 3.5 Sonnet)
+                        </p>
                         <div class="config-item">
                             <label>Provider Name</label>
                             <input type="text" id="PRIMARY_AI_PROVIDER" class="config-input">
@@ -93,6 +97,10 @@
                 <div class="config-section">
                     <h3>🔄 Fallback AI Provider (Optional)</h3>
                     <div class="config-grid">
+                        <p style="grid-column: span 3; color: #666; font-size: 0.9em; margin-bottom: 15px;">
+                            Backup system used when the Primary Provider is experiencing downtime or rate limits.
+                            Ensures continuous operation.
+                        </p>
                         <div class="config-item">
                             <label>Provider Name</label>
                             <input type="text" id="FALLBACK_AI_PROVIDER" class="config-input">
@@ -116,6 +124,10 @@
                 <div class="config-section">
                     <h3>📝 WordPress Configuration</h3>
                     <div class="config-grid">
+                        <p style="grid-column: span 3; color: #666; font-size: 0.9em; margin-bottom: 15px;">
+                            Connection details for your WordPress site. Used to publish articles, upload images, and
+                            manage SEO metadata.
+                        </p>
                         <div class="config-item">
                             <label>WordPress URL</label>
                             <input type="text" id="WORDPRESS_URL" class="config-input">
@@ -147,6 +159,10 @@
                 <div class="config-section">
                     <h3>📈 Google Search Console (P1)</h3>
                     <div class="config-grid">
+                        <p style="grid-column: span 3; color: #666; font-size: 0.9em; margin-bottom: 15px;">
+                            Connects to GSC to analyze search performance, find content gaps, and trigger data-driven
+                            content updates.
+                        </p>
                         <div class="config-item">
                             <label>Site URL (e.g., sc-domain:example.com)</label>
                             <input type="text" id="GSC_SITE_URL" class="config-input"
@@ -171,6 +187,10 @@
                 <div class="config-section">
                     <h3>✈️ Autopilot Settings (P0)</h3>
                     <div class="config-grid">
+                        <p style="grid-column: span 3; color: #666; font-size: 0.9em; margin-bottom: 15px;">
+                            Controls the automated content generation engine. Set usage limits, publishing schedules,
+                            and content quality thresholds.
+                        </p>
                         <div class="config-item">
                             <label>Enabled</label>
                             <select id="AUTOPILOT_ENABLED" class="config-input">
@@ -205,17 +225,39 @@
                 <div class="config-section">
                     <h3>🔍 Keyword Research API (Optional)</h3>
                     <div class="config-grid">
+                        <p style="grid-column: span 3; color: #666; font-size: 0.9em; margin-bottom: 15px;">
+                            Configures third-party keyword data providers (like DataForSEO or Semrush) to fetch search
+                            volume and difficulty metrics.
+                        </p>
                         <div class="config-item">
                             <label>Provider</label>
-                            <input type="text" id="KEYWORD_API_PROVIDER" class="config-input">
+                            <select id="KEYWORD_API_PROVIDER" class="config-input">
+                                <option value="">Select Provider</option>
+                                <option value="dataforseo">DataForSEO (Requires Email & Password)</option>
+                                <option value="semrush">Semrush (Requires API Key)</option>
+                                <option value="ahrefs">Ahrefs (Coming Soon)</option>
+                                <option value="mock">Mock/Test Mode</option>
+                            </select>
+                            <small style="color: #666; display: block; margin-top: 5px;">Select the service to use for
+                                keyword metrics.</small>
                         </div>
                         <div class="config-item">
-                            <label>API Key</label>
+                            <label>API Username / Email</label>
+                            <input type="text" id="KEYWORD_API_USERNAME" class="config-input"
+                                placeholder="e.g. your_email@example.com">
+                            <small style="color: #666; display: block; margin-top: 5px;">Required for DataForSEO (use
+                                your login email).</small>
+                        </div>
+                        <div class="config-item">
+                            <label>API Key / Password</label>
                             <input type="password" id="KEYWORD_API_KEY" class="config-input">
+                            <small style="color: #666; display: block; margin-top: 5px;">DataForSEO: Use your account
+                                password. Semrush: Use your API Key.</small>
                         </div>
                         <div class="config-item">
-                            <label>Base URL</label>
-                            <input type="text" id="KEYWORD_API_BASE_URL" class="config-input">
+                            <label>Base URL (Optional)</label>
+                            <input type="text" id="KEYWORD_API_BASE_URL" class="config-input"
+                                placeholder="Leave empty for defaults">
                         </div>
                     </div>
                 </div>
@@ -224,6 +266,10 @@
                 <div class="config-section">
                     <h3>⚙️ System Configuration</h3>
                     <div class="config-grid">
+                        <p style="grid-column: span 3; color: #666; font-size: 0.9em; margin-bottom: 15px;">
+                            Low-level system settings for logging, concurrency limits, and timeouts. Adjust only if
+                            necessary.
+                        </p>
                         <div class="config-item">
                             <label>Log Level</label>
                             <select id="LOG_LEVEL" class="config-input">

@@ -1,5 +1,5 @@
 
-from fastapi import APIRouter, HTTPException, BackgroundTasks, Request
+from fastapi import APIRouter, BackgroundTasks, Request
 from typing import Dict, Any, Optional
 from pydantic import BaseModel
 from src.conversion.dynamic_cta import CTATracker, CTARecommendationEngine, UserIntent

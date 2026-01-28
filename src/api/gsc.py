@@ -1,8 +1,7 @@
 
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.orm import Session
-from typing import List, Optional
-from datetime import datetime
+from typing import List
 from pydantic import BaseModel
 
 from src.core.database import get_db

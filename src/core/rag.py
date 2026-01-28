@@ -10,14 +10,11 @@ Features:
 """
 
 import logging
-import json
 import os
 import pickle
-import asyncio
 from typing import List, Dict, Any, Optional, Tuple
 from dataclasses import dataclass, field
 from datetime import datetime
-import numpy as np
 
 # We'll use the AI Provider from core to get embeddings
 from src.core.ai_provider import AIProviderInterface

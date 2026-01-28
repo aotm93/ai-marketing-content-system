@@ -10,13 +10,12 @@ This agent coordinates the publishing workflow:
 5. Record in audit log
 """
 
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional
 import logging
-from datetime import datetime
 
 from .base_agent import BaseAgent
 from src.integrations import WordPressAdapter
-from src.integrations.publisher_adapter import PublishableContent, PublishResult, PublishStatus
+from src.integrations.publisher_adapter import PublishableContent
 from src.integrations.rankmath_adapter import SEOMeta
 from src.config import settings
 

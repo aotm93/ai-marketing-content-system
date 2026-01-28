@@ -10,7 +10,7 @@ Features:
 
 import logging
 import httpx
-from typing import List, Dict, Any, Optional
+from typing import List, Optional
 from dataclasses import dataclass
 from src.config import settings
 
@@ -30,13 +30,14 @@ class KeywordClient:
     Client for External Keyword Research API
     """
     
-    def __init__(self, provider: str = "generic", api_key: Optional[str] = None, base_url: Optional[str] = None):
+    def __init__(self, provider: str = "generic", api_key: Optional[str] = None, api_username: Optional[str] = None, base_url: Optional[str] = None):
         self.provider = provider or settings.keyword_api_provider
         self.api_key = api_key or settings.keyword_api_key
+        self.api_username = api_username or settings.keyword_api_username
         self.base_url = base_url or settings.keyword_api_base_url
         
         if not self.api_key:
-            logger.warning("Keyword API Key not configured")
+            logger.warning("Keyword API Key/Password not configured")
 
     async def get_keyword_suggestions(self, seed_keyword: str, limit: int = 10) -> List[KeywordOpportunity]:
         """

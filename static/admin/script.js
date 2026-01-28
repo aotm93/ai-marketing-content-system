@@ -123,6 +123,7 @@ function populateConfigFields(config) {
         'wordpress_username': 'WORDPRESS_USERNAME',
         'seo_plugin': 'SEO_PLUGIN',
         'keyword_api_provider': 'KEYWORD_API_PROVIDER',
+        'keyword_api_username': 'KEYWORD_API_USERNAME',
         'log_level': 'LOG_LEVEL',
         'max_concurrent_agents': 'MAX_CONCURRENT_AGENTS',
         'content_generation_timeout': 'CONTENT_GENERATION_TIMEOUT',
@@ -154,7 +155,7 @@ async function handleSaveAll() {
         'FALLBACK_AI_TEXT_MODEL',
         'WORDPRESS_URL', 'WORDPRESS_USERNAME', 'WORDPRESS_PASSWORD',
         'SEO_PLUGIN', 'SEO_API_KEY',
-        'KEYWORD_API_PROVIDER', 'KEYWORD_API_KEY', 'KEYWORD_API_BASE_URL',
+        'KEYWORD_API_PROVIDER', 'KEYWORD_API_KEY', 'KEYWORD_API_USERNAME', 'KEYWORD_API_BASE_URL',
         'LOG_LEVEL', 'MAX_CONCURRENT_AGENTS', 'CONTENT_GENERATION_TIMEOUT',
         // New Keys
         'AUTOPILOT_ENABLED', 'AUTOPILOT_MODE', 'PUBLISH_INTERVAL_MINUTES',

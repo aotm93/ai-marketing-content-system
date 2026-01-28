@@ -9,9 +9,8 @@ Stores:
 """
 
 from sqlalchemy import Column, Integer, String, Float, DateTime, Text, Index, UniqueConstraint, Date
-from sqlalchemy.sql import func
-from datetime import datetime, date
-from typing import Dict, Any, Optional, List
+from datetime import datetime
+from typing import Dict, Any
 
 from .base import Base, TimestampMixin
 

@@ -4,20 +4,17 @@ Provides API for programmatic SEO page generation and management
 """
 
 import logging
-from typing import Dict, Any, List, Optional
+from typing import Optional
 from fastapi import APIRouter, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 
 from src.pseo import (
     pSEOFactory,
     FactoryConfig,
-    DimensionModel,
-    PageTemplate,
-    CombinationFilter
+    create_bottle_dimension_model
 )
-# from src.pseo import create_bottle_dimension_model # Removed as it causes import error if not exposed
 from src.pseo.page_factory import BatchJobQueue
-from src.pseo.components import ComponentRegistry, ComponentType, FAQComponent, HeroComponent, create_default_template
+from src.pseo.components import create_default_template
 
 logger = logging.getLogger(__name__)
 

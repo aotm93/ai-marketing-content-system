@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Text, Enum
+from sqlalchemy import Column, Integer, Text, Enum
 import enum
 from .base import Base, TimestampMixin
 

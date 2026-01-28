@@ -1,6 +1,6 @@
 
 from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker, Session
+from sqlalchemy.orm import sessionmaker
 from src.config import settings
 from src.models.base import Base
 
@@ -21,9 +21,6 @@ def get_db():
 def init_db():
     """Initialize database tables"""
     # Import all models here to ensure they are registered with Base.metadata
-    import src.models.conversion  # P3 Models
-    import src.models.gsc_data    # P4 Models
-    import src.models.config      # Config Model
     # import src.models.content # P1/P2 Models if they exist (not created yet or used elsewhere)
     
     Base.metadata.create_all(bind=engine)

@@ -2,7 +2,7 @@
 from fastapi import Request, HTTPException, status
 from datetime import datetime, timedelta
 from collections import defaultdict
-from typing import Dict, Tuple
+from typing import Dict
 import asyncio
 
 # Simple in-memory rate limiter

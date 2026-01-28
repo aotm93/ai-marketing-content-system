@@ -11,9 +11,8 @@ Features:
 """
 
 import logging
-from typing import Dict, Any, List, Optional, Tuple
-from dataclasses import dataclass, field
-import re
+from typing import Dict, Any, List, Tuple
+from dataclasses import dataclass
 from bs4 import BeautifulSoup
 
 from .base_agent import BaseAgent

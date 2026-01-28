@@ -13,13 +13,11 @@ Provides:
 from fastapi import APIRouter, HTTPException, status, Depends, BackgroundTasks
 from pydantic import BaseModel, Field
 from typing import Optional, Dict, Any, List
-from datetime import datetime
-from enum import Enum
 
 from src.core.auth import get_current_admin
-from src.scheduler import AutopilotScheduler, AutopilotConfig, JobRunner, JobConfig, get_job_runner
+from src.scheduler import AutopilotConfig, get_job_runner
 from src.scheduler.autopilot import AutopilotMode, get_autopilot, configure_autopilot
-from src.integrations import WordPressClient, RankMathAdapter, WordPressAdapter
+from src.integrations import WordPressClient, WordPressAdapter
 from src.config import settings
 
 router = APIRouter(prefix="/api/v1/autopilot", tags=["autopilot"])
@@ -400,13 +398,68 @@ async def retry_failed_job(
     job_id: str,
     admin: dict = Depends(get_current_admin)
 ):
-    """Retry a failed job"""
-    # TODO: Implement job retry from history
-    return {
-        "success": False,
-        "message": "Job retry not yet implemented",
-        "job_id": job_id
-    }
+    """
+    Retry a failed job
+    
+    Retrieves the failed job from history and re-executes it.
+    Useful for retrying jobs that failed due to transient errors.
+    """
+    from src.scheduler.jobs import JOB_REGISTRY
+    
+    job_runner = get_job_runner()
+    
+    # Find the failed job in history
+    failed_jobs = job_runner.get_failed_jobs(limit=50)
+    target_job = None
+    
+    for job in failed_jobs:
+        if job.get("job_id") == job_id:
+            target_job = job
+            break
+    
+    if not target_job:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Job {job_id} not found in failed jobs history"
+        )
+    
+    job_type = target_job.get("job_type")
+    
+    # Get the job function from registry
+    if job_type not in JOB_REGISTRY:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Job type '{job_type}' not found in registry"
+        )
+    
+    job_func = JOB_REGISTRY[job_type]
+    
+    # Get original job data if available, otherwise use empty config
+    original_data = target_job.get("result_data", {}).get("original_data", {})
+    if not original_data:
+        original_data = {"config": {}}
+    
+    try:
+        # Execute the job immediately (bypassing rate limit for retry)
+        result = await job_runner.run_now(
+            job_type=job_type,
+            job_func=job_func,
+            job_data=original_data
+        )
+        
+        return {
+            "success": result.status.value == "success",
+            "message": f"Job {job_id} retry {'succeeded' if result.status.value == 'success' else 'failed'}",
+            "job_id": job_id,
+            "new_job_id": result.job_id,
+            "result": result.to_dict()
+        }
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Retry execution failed: {str(e)}"
+        )
 
 
 # ==================== SEO Integration Check ====================

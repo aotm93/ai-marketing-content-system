@@ -11,8 +11,7 @@ Refreshes existing content to improve rankings:
 
 import logging
 from typing import Dict, Any, List, Optional
-from dataclasses import dataclass, field
-from datetime import datetime
+from dataclasses import dataclass
 import re
 
 from .base_agent import BaseAgent
@@ -284,6 +283,15 @@ class ContentRefreshAgent(BaseAgent):
                 "severity": "medium",
                 "metric": f"CTR {round(ctr * 100, 2)}% below expected",
                 "action": "Optimize title and meta description"
+            })
+        
+        # Low impressions warning (potential indexing issue)
+        if impressions < 10 and position > 0:
+            issues.append({
+                "type": "low_visibility",
+                "severity": "low",
+                "metric": f"Only {impressions} impressions",
+                "action": "Check indexing status and site structure"
             })
         
         return issues

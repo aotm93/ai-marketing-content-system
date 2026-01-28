@@ -1,14 +1,11 @@
 """Admin API endpoints for configuration management"""
 from fastapi import APIRouter, HTTPException, status, Depends, Response, Request
-from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import Optional, Dict, Any
 from datetime import timedelta
 from src.core.auth import authenticate_admin, create_access_token, get_current_admin
-from src.core.rate_limiter import check_rate_limit, login_rate_limiter, api_rate_limiter
+from src.core.rate_limiter import check_rate_limit, login_rate_limiter
 from src.config import settings
-import os
-import json
 from src.core.database import get_db
 from sqlalchemy.orm import Session
 from src.config.utils import update_config_value
@@ -131,6 +128,8 @@ async def get_config(admin: dict = Depends(get_current_admin)):
         
         # Keyword Research
         "keyword_api_provider": settings.keyword_api_provider or "",
+        "keyword_api_username": settings.keyword_api_username or "",
+        "keyword_api_key": settings.keyword_api_key or "", # Explicitly included for UI population check
         
         # System
         "environment": settings.environment,
@@ -176,7 +175,7 @@ async def update_config(
         "FALLBACK_AI_TEXT_MODEL", "FALLBACK_AI_IMAGE_MODEL",
         "WORDPRESS_URL", "WORDPRESS_USERNAME", "WORDPRESS_PASSWORD",
         "SEO_PLUGIN", "SEO_API_KEY",
-        "KEYWORD_API_PROVIDER", "KEYWORD_API_KEY", "KEYWORD_API_BASE_URL",
+        "KEYWORD_API_PROVIDER", "KEYWORD_API_KEY", "KEYWORD_API_USERNAME", "KEYWORD_API_BASE_URL",
         "LOG_LEVEL", "MAX_CONCURRENT_AGENTS", "CONTENT_GENERATION_TIMEOUT",
         # P0-13: Autopilot
         "AUTOPILOT_ENABLED", "AUTOPILOT_MODE", "PUBLISH_INTERVAL_MINUTES",

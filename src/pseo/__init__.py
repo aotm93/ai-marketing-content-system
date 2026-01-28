@@ -22,7 +22,8 @@ from .dimension_model import (
     DimensionValue,
     DimensionModel,
     CombinationFilter,
-    PageCombination
+    PageCombination,
+    create_bottle_dimension_model
 )
 
 from .page_factory import (
@@ -49,6 +50,7 @@ __all__ = [
     "DimensionModel",
     "CombinationFilter",
     "PageCombination",
+    "create_bottle_dimension_model",
     "pSEOFactory",
     "FactoryConfig",
     "GenerationResult",

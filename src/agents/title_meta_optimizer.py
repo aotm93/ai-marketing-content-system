@@ -10,8 +10,8 @@ Generates optimized title and meta description variations to improve CTR:
 """
 
 import logging
-from typing import Dict, Any, List, Optional, Tuple
-from dataclasses import dataclass, field
+from typing import Dict, Any, List
+from dataclasses import dataclass
 import re
 
 from .base_agent import BaseAgent

@@ -9,11 +9,10 @@ Features:
 - Integration with job runner
 """
 
-import asyncio
 import logging
-from datetime import datetime, timedelta
-from typing import Dict, Any, Optional, Callable, List
-from dataclasses import dataclass, field
+from datetime import datetime
+from typing import Dict, Any, Optional, Callable
+from dataclasses import dataclass
 from enum import Enum
 
 try:
@@ -27,7 +26,7 @@ except ImportError:
     APSCHEDULER_AVAILABLE = False
     AsyncIOScheduler = None
 
-from .job_runner import JobRunner, JobConfig, get_job_runner
+from .job_runner import JobConfig, get_job_runner
 
 logger = logging.getLogger(__name__)
 

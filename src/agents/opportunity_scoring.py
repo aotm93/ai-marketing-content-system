@@ -10,10 +10,8 @@ Analyzes GSC data to identify and score SEO opportunities:
 """
 
 import logging
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Dict, Any, List, Tuple
 from dataclasses import dataclass
-from datetime import datetime
-import json
 import uuid
 
 from .base_agent import BaseAgent
