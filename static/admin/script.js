@@ -125,7 +125,16 @@ function populateConfigFields(config) {
         'keyword_api_provider': 'KEYWORD_API_PROVIDER',
         'log_level': 'LOG_LEVEL',
         'max_concurrent_agents': 'MAX_CONCURRENT_AGENTS',
-        'content_generation_timeout': 'CONTENT_GENERATION_TIMEOUT'
+        'content_generation_timeout': 'CONTENT_GENERATION_TIMEOUT',
+        // New Fields
+        'autopilot_enabled': 'AUTOPILOT_ENABLED',
+        'autopilot_mode': 'AUTOPILOT_MODE',
+        'publish_interval_minutes': 'PUBLISH_INTERVAL_MINUTES',
+        'max_posts_per_day': 'MAX_POSTS_PER_DAY',
+        'max_concurrent_jobs': 'MAX_CONCURRENT_JOBS',
+        'gsc_site_url': 'GSC_SITE_URL',
+        'gsc_auth_method': 'GSC_AUTH_METHOD',
+        'gsc_credentials_json': 'GSC_CREDENTIALS_JSON'
     };
 
     for (const [key, elementId] of Object.entries(mapping)) {
@@ -146,7 +155,11 @@ async function handleSaveAll() {
         'WORDPRESS_URL', 'WORDPRESS_USERNAME', 'WORDPRESS_PASSWORD',
         'SEO_PLUGIN', 'SEO_API_KEY',
         'KEYWORD_API_PROVIDER', 'KEYWORD_API_KEY', 'KEYWORD_API_BASE_URL',
-        'LOG_LEVEL', 'MAX_CONCURRENT_AGENTS', 'CONTENT_GENERATION_TIMEOUT'
+        'LOG_LEVEL', 'MAX_CONCURRENT_AGENTS', 'CONTENT_GENERATION_TIMEOUT',
+        // New Keys
+        'AUTOPILOT_ENABLED', 'AUTOPILOT_MODE', 'PUBLISH_INTERVAL_MINUTES',
+        'MAX_POSTS_PER_DAY', 'MAX_CONCURRENT_JOBS',
+        'GSC_SITE_URL', 'GSC_AUTH_METHOD', 'GSC_CREDENTIALS_JSON'
     ];
 
     let successCount = 0;
@@ -157,7 +170,21 @@ async function handleSaveAll() {
 
     for (const key of configKeys) {
         const element = document.getElementById(key);
-        if (element && element.value) {
+        // Save if element exists, regardless of whether value is empty or not
+        if (element) {
+            let valueToSend = element.value;
+
+            // Special handling for JSON fields: Minify to single line
+            if (key === 'GSC_CREDENTIALS_JSON' && valueToSend.trim().startsWith('{')) {
+                try {
+                    const parsed = JSON.parse(valueToSend);
+                    valueToSend = JSON.stringify(parsed);
+                } catch (e) {
+                    console.error('Invalid JSON provided for credentials');
+                    // Continue with raw value, backend/env might handle or break
+                }
+            }
+
             try {
                 const response = await fetch(`${API_BASE}/config`, {
                     method: 'PUT',
@@ -167,7 +194,7 @@ async function handleSaveAll() {
                     credentials: 'include',
                     body: JSON.stringify({
                         config_key: key,
-                        config_value: element.value
+                        config_value: valueToSend
                     })
                 });
 
@@ -175,9 +202,11 @@ async function handleSaveAll() {
                     successCount++;
                 } else {
                     failCount++;
+                    console.error(`Failed to save ${key}:`, await response.text());
                 }
             } catch (error) {
                 failCount++;
+                console.error(`Error saving ${key}:`, error);
             }
         }
     }

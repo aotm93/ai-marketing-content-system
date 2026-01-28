@@ -13,9 +13,9 @@ class BaseAgent(ABC):
 
     def __init__(
         self,
-        name: str,
-        ai_provider: AIProviderInterface,
-        event_bus: EventBus
+        name: str = "base_agent",
+        ai_provider: Optional[AIProviderInterface] = None,
+        event_bus: Optional[EventBus] = None
     ):
         self.name = name
         self.ai_provider = ai_provider

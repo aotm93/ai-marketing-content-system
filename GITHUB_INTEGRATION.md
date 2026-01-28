@@ -9,7 +9,7 @@ This checklist ensures your repository is properly configured for automatic depl
 - [ ] `.gitignore` configured to exclude sensitive files
 - [ ] `.env` file NOT committed (only `.env.example`)
 
-## Required Files for Zeabur
+## Required Files for Deployment
 
 - [x] `requirements.txt` - Python dependencies
 - [x] `Dockerfile` - Container configuration
@@ -17,10 +17,6 @@ This checklist ensures your repository is properly configured for automatic depl
 - [x] `Procfile` - Process definition
 - [x] `.env.example` - Environment variable template
 - [x] `DEPLOYMENT.md` - Deployment guide
-
-## GitHub Actions (Optional)
-
-- [x] `.github/workflows/zeabur-deploy.yml` - Pre-deployment checks
 
 ## Security Checklist
 
@@ -37,21 +33,23 @@ This checklist ensures your repository is properly configured for automatic depl
 - [ ] Repository access granted to Zeabur
 - [ ] Auto-deploy enabled for main branch
 
-## Environment Variables in Zeabur
+## Environment Variables Strategy
 
-Required variables to set in Zeabur dashboard:
+**SIMPLIFIED DEPLOYMENT**: We now use a database-driven configuration.
 
-- [ ] `PRIMARY_AI_API_KEY`
-- [ ] `WORDPRESS_URL`
-- [ ] `WORDPRESS_USERNAME`
-- [ ] `WORDPRESS_PASSWORD`
-- [ ] `ADMIN_PASSWORD`
-- [ ] `ADMIN_SESSION_SECRET`
+### Deployment Variables (Set in Zeabur)
+Only these are strictly required for the app to start:
+- [ ] `DATABASE_URL` (Auto-configured by Zeabur PostgreSQL service)
+- [ ] `REDIS_URL` (Auto-configured by Zeabur Redis service)
+- [ ] `ADMIN_PASSWORD` (Set manually - for initial login)
+- [ ] `ADMIN_SESSION_SECRET` (Set manually - for security)
 
-Auto-configured by Zeabur:
-- [x] `DATABASE_URL` (from PostgreSQL service)
-- [x] `REDIS_URL` (from Redis service)
-- [x] `PORT` (automatically set)
+### Business Configuration (Set in Admin Panel)
+Do **NOT** set these in Zeabur unless you explicitly want to override the database settings:
+- `PRIMARY_AI_API_KEY`
+- `WORDPRESS_URL`
+- `WORDPRESS_USERNAME`
+- `WORDPRESS_PASSWORD`
 
 ## Deployment Workflow
 
@@ -67,7 +65,6 @@ Auto-configured by Zeabur:
    - Zeabur detects changes
    - Builds application
    - Deploys to production
-   - Zero downtime
 
 ## Verification Steps
 
@@ -75,9 +72,9 @@ After deployment:
 
 - [ ] Visit application URL (e.g., `https://your-app.zeabur.app`)
 - [ ] Check health endpoint: `/health`
-- [ ] Access admin panel: `/admin`
-- [ ] Login with admin password
-- [ ] Verify configuration in admin panel
+- [ ] **Action Required**: Go to `/admin` -> Login -> **Configuration**
+- [ ] **Action Required**: Enter WordPress & AI credentials in Admin Panel and Save
+- [ ] Verify configuration is saved
 - [ ] Test API endpoints
 
 ## Troubleshooting
@@ -85,13 +82,6 @@ After deployment:
 If deployment fails:
 
 1. Check Zeabur build logs
-2. Verify all environment variables are set
-3. Check GitHub Actions logs (if enabled)
-4. Ensure all dependencies in `requirements.txt`
-5. Review `DEPLOYMENT.md` for detailed troubleshooting
-
-## Support
-
-- Zeabur Documentation: https://zeabur.com/docs
-- GitHub Issues: Report in your repository
-- Deployment Guide: See `DEPLOYMENT.md`
+2. Verify `DATABASE_URL` is correct
+3. Ensure `ADMIN_PASSWORD` is set
+4. Review `DEPLOYMENT.md` for detailed troubleshooting

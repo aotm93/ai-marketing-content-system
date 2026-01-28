@@ -9,6 +9,9 @@ from src.core.rate_limiter import check_rate_limit, login_rate_limiter, api_rate
 from src.config import settings
 import os
 import json
+from src.core.database import get_db
+from sqlalchemy.orm import Session
+from src.config.utils import update_config_value
 
 router = APIRouter(prefix="/api/v1/admin", tags=["admin"])
 
@@ -110,21 +113,42 @@ async def get_config(admin: dict = Depends(get_current_admin)):
     Returns non-sensitive configuration values
     """
     safe_config = {
+        # Primary AI Provider
         "primary_ai_provider": settings.primary_ai_provider,
         "primary_ai_base_url": settings.primary_ai_base_url,
         "primary_ai_text_model": settings.primary_ai_text_model,
         "primary_ai_image_model": settings.primary_ai_image_model,
-        "fallback_ai_provider": settings.fallback_ai_provider,
-        "fallback_ai_base_url": settings.fallback_ai_base_url,
-        "fallback_ai_text_model": settings.fallback_ai_text_model,
+        
+        # Fallback AI Provider
+        "fallback_ai_provider": settings.fallback_ai_provider or "",
+        "fallback_ai_base_url": settings.fallback_ai_base_url or "",
+        "fallback_ai_text_model": settings.fallback_ai_text_model or "",
+        
+        # WordPress
         "wordpress_url": settings.wordpress_url,
         "wordpress_username": settings.wordpress_username,
         "seo_plugin": settings.seo_plugin,
-        "keyword_api_provider": settings.keyword_api_provider,
+        
+        # Keyword Research
+        "keyword_api_provider": settings.keyword_api_provider or "",
+        
+        # System
         "environment": settings.environment,
         "log_level": settings.log_level,
-        "max_concurrent_agents": settings.max_concurrent_agents,
-        "content_generation_timeout": settings.content_generation_timeout,
+        "max_concurrent_agents": str(settings.max_concurrent_agents),
+        "content_generation_timeout": str(settings.content_generation_timeout),
+        
+        # P0-13: Autopilot - Return as strings for select/input compatibility
+        "autopilot_enabled": "True" if settings.autopilot_enabled else "False",
+        "autopilot_mode": settings.autopilot_mode,
+        "publish_interval_minutes": str(settings.publish_interval_minutes),
+        "max_posts_per_day": str(settings.max_posts_per_day),
+        "max_concurrent_jobs": str(settings.max_concurrent_jobs),
+        
+        # P1: GSC
+        "gsc_site_url": settings.gsc_site_url or "",
+        "gsc_auth_method": settings.gsc_auth_method,
+        "gsc_credentials_json": settings.gsc_credentials_json or "",
     }
 
     return ConfigResponse(
@@ -135,11 +159,15 @@ async def get_config(admin: dict = Depends(get_current_admin)):
 
 
 @router.put("/config", response_model=ConfigResponse)
-async def update_config(request: ConfigUpdateRequest, admin: dict = Depends(get_current_admin)):
+async def update_config(
+    request: ConfigUpdateRequest, 
+    admin: dict = Depends(get_current_admin),
+    db: Session = Depends(get_db)
+):
     """
     Update configuration value
 
-    Updates environment variables and reloads settings
+    Persists change to Database (SystemConfig) and reloads settings
     """
     allowed_keys = [
         "PRIMARY_AI_PROVIDER", "PRIMARY_AI_BASE_URL", "PRIMARY_AI_API_KEY",
@@ -149,7 +177,12 @@ async def update_config(request: ConfigUpdateRequest, admin: dict = Depends(get_
         "WORDPRESS_URL", "WORDPRESS_USERNAME", "WORDPRESS_PASSWORD",
         "SEO_PLUGIN", "SEO_API_KEY",
         "KEYWORD_API_PROVIDER", "KEYWORD_API_KEY", "KEYWORD_API_BASE_URL",
-        "LOG_LEVEL", "MAX_CONCURRENT_AGENTS", "CONTENT_GENERATION_TIMEOUT"
+        "LOG_LEVEL", "MAX_CONCURRENT_AGENTS", "CONTENT_GENERATION_TIMEOUT",
+        # P0-13: Autopilot
+        "AUTOPILOT_ENABLED", "AUTOPILOT_MODE", "PUBLISH_INTERVAL_MINUTES",
+        "MAX_POSTS_PER_DAY", "MAX_CONCURRENT_JOBS",
+        # P1: GSC
+        "GSC_SITE_URL", "GSC_AUTH_METHOD", "GSC_CREDENTIALS_JSON", "GSC_CREDENTIALS_PATH"
     ]
 
     if request.config_key not in allowed_keys:
@@ -159,32 +192,24 @@ async def update_config(request: ConfigUpdateRequest, admin: dict = Depends(get_
         )
 
     try:
-        # Read current .env file
-        env_path = ".env"
-        env_vars = {}
+        # Determine data type
+        data_type = "string"
+        key_upper = request.config_key.upper()
+        
+        if key_upper in ["AUTOPILOT_ENABLED", "WORDPRESS_API_ENABLED", "ENABLE_METRICS"]:
+            data_type = "bool"
+        elif any(x in key_upper for x in ["_PORT", "_TIMEOUT", "_MINUTES", "_COUNT", "_MAX", "_ID"]):
+            data_type = "int"
+            
+        # Update in database and refresh settings
+        success = update_config_value(db, request.config_key, request.config_value, data_type)
 
-        if os.path.exists(env_path):
-            with open(env_path, 'r') as f:
-                for line in f:
-                    line = line.strip()
-                    if line and not line.startswith('#') and '=' in line:
-                        key, value = line.split('=', 1)
-                        env_vars[key.strip()] = value.strip()
-
-        # Update the value
-        env_vars[request.config_key] = request.config_value
-
-        # Write back to .env file
-        with open(env_path, 'w') as f:
-            for key, value in env_vars.items():
-                f.write(f"{key}={value}\n")
-
-        # Update environment variable
-        os.environ[request.config_key] = request.config_value
+        if not success:
+             raise Exception("Database update failed")
 
         return ConfigResponse(
             success=True,
-            message=f"Configuration '{request.config_key}' updated successfully. Restart required for full effect.",
+            message=f"Configuration '{request.config_key}' updated successfully.",
             data={"key": request.config_key, "updated": True}
         )
 

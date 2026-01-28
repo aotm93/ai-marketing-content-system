@@ -62,8 +62,8 @@ def authenticate_admin(password: str) -> bool:
 
 
 async def get_current_admin(
-    authorization: Optional[HTTPAuthorizationCredentials] = Depends(security),
-    session_token: Optional[str] = Cookie(None)
+    session_token: Optional[str] = Cookie(None),
+    authorization: Optional[HTTPAuthorizationCredentials] = Depends(HTTPBearer(auto_error=False))
 ) -> dict:
     """Dependency to get current authenticated admin"""
     token = None

@@ -1,11 +1,13 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AI Marketing System - Admin Panel</title>
     <link rel="stylesheet" href="style.css">
 </head>
+
 <body>
     <!-- Login Screen -->
     <div id="loginScreen" class="screen active">
@@ -44,6 +46,19 @@
             </div>
 
             <div id="messageBox" class="message-box"></div>
+
+            <!-- New Dashboard Protocol -->
+            <div class="dashboard-banner"
+                style="background: linear-gradient(135deg, #6366f1, #a855f7); color: white; padding: 20px; border-radius: 8px; margin-bottom: 30px; display: flex; justify-content: space-between; align-items: center;">
+                <div>
+                    <h2 style="margin: 0; font-size: 1.5rem;">🎉 System Upgraded to v2.0</h2>
+                    <p style="margin: 5px 0 0 0; opacity: 0.9;">The new React Dashboard is ready. Use this panel for
+                        configuration only.</p>
+                </div>
+                <a href="/dashboard/" target="_blank" class="btn"
+                    style="background: white; color: #6366f1; font-weight: bold; text-decoration: none; padding: 12px 24px; border-radius: 6px;">🚀
+                    Open Cockpit</a>
+            </div>
 
             <!-- Configuration Sections -->
             <div class="config-sections">
@@ -116,6 +131,7 @@
                         <div class="config-item">
                             <label>SEO Plugin</label>
                             <select id="SEO_PLUGIN" class="config-input">
+                                <option value="rank_math">RankMath</option>
                                 <option value="yoast">Yoast SEO</option>
                                 <option value="aioseo">All in One SEO</option>
                             </select>
@@ -123,6 +139,64 @@
                         <div class="config-item">
                             <label>SEO API Key</label>
                             <input type="password" id="SEO_API_KEY" class="config-input">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- GSC Configuration (New) -->
+                <div class="config-section">
+                    <h3>📈 Google Search Console (P1)</h3>
+                    <div class="config-grid">
+                        <div class="config-item">
+                            <label>Site URL (e.g., sc-domain:example.com)</label>
+                            <input type="text" id="GSC_SITE_URL" class="config-input"
+                                placeholder="sc-domain:mysite.com">
+                        </div>
+                        <div class="config-item">
+                            <label>Auth Method</label>
+                            <select id="GSC_AUTH_METHOD" class="config-input">
+                                <option value="service_account">Service Account</option>
+                                <option value="oauth">OAuth</option>
+                            </select>
+                        </div>
+                        <div class="config-item" style="grid-column: span 2;">
+                            <label>Service Account JSON Content</label>
+                            <textarea id="GSC_CREDENTIALS_JSON" class="config-input"
+                                style="height: 100px; font-family: monospace;"></textarea>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Autopilot Configuration (New) -->
+                <div class="config-section">
+                    <h3>✈️ Autopilot Settings (P0)</h3>
+                    <div class="config-grid">
+                        <div class="config-item">
+                            <label>Enabled</label>
+                            <select id="AUTOPILOT_ENABLED" class="config-input">
+                                <option value="True">Yes</option>
+                                <option value="False">No</option>
+                            </select>
+                        </div>
+                        <div class="config-item">
+                            <label>Mode</label>
+                            <select id="AUTOPILOT_MODE" class="config-input">
+                                <option value="standard">Standard</option>
+                                <option value="conservative">Conservative</option>
+                                <option value="aggressive">Aggressive</option>
+                            </select>
+                        </div>
+                        <div class="config-item">
+                            <label>Publish Interval (Min)</label>
+                            <input type="number" id="PUBLISH_INTERVAL_MINUTES" class="config-input">
+                        </div>
+                        <div class="config-item">
+                            <label>Max Posts/Day</label>
+                            <input type="number" id="MAX_POSTS_PER_DAY" class="config-input">
+                        </div>
+                        <div class="config-item">
+                            <label>Max Concurrent Jobs</label>
+                            <input type="number" id="MAX_CONCURRENT_JOBS" class="config-input">
                         </div>
                     </div>
                 </div>
@@ -180,4 +254,5 @@
 
     <script src="script.js"></script>
 </body>
+
 </html>

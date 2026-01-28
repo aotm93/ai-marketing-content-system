@@ -19,6 +19,9 @@ alembic==1.13.1
 redis==5.0.1
 celery==5.3.6
 
+# Scheduler (P0 Autopilot)
+APScheduler==3.10.4
+
 # HTTP & API
 httpx==0.26.0
 requests==2.31.0
@@ -30,6 +33,11 @@ python-wordpress-xmlrpc==2.3
 # SEO & Keyword Research
 beautifulsoup4==4.12.3
 lxml==5.1.0
+
+# Google API (P1 - GSC Integration)
+google-api-python-client==2.111.0
+google-auth-httplib2==0.2.0
+google-auth-oauthlib==1.2.0
 
 # Image Processing
 Pillow==10.2.0
@@ -55,3 +63,4 @@ httpx==0.26.0
 black==24.1.1
 ruff==0.1.14
 mypy==1.8.0
+ruff==0.1.14

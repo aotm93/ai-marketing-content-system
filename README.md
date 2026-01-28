@@ -1,272 +1,131 @@
-# AI Marketing Content System
+# SEO Autopilot - AI Marketing Content System
 
-Autonomous multi-agent system for generating marketing content and driving organic traffic to WordPress e-commerce stores.
+> 全栈 SEO 自动化 + 转化闭环平台
 
-## Overview
+[![Version](https://img.shields.io/badge/version-4.1.0-blue.svg)](https://github.com/yourusername/seo-autopilot)
+[![Python](https://img.shields.io/badge/python-3.10+-green.svg)](https://www.python.org/)
+[![License](https://img.shields.io/badge/license-MIT-orange.svg)](LICENSE)
 
-This system uses collaborative AI agents to autonomously research, strategize, and execute content marketing campaigns. Designed specifically for wholesale bottle packaging businesses, it can be adapted to any e-commerce niche.
+## 🚀 概述
 
-## Key Features
+**SEO Autopilot** 是一个企业级的 AI 驱动 SEO 自动化平台，集成了内容生成、程序化 SEO、Google Search Console 数据分析、转化追踪和外链建设等全流程功能。
 
-- **Multi-Agent Architecture**: Specialized AI agents work together like a marketing team
-- **Autonomous Operation**: Minimal human intervention required
-- **Flexible AI Providers**: Support for any OpenAI-compatible API
-- **Modular Design**: Easy to extend with plugins
-- **Event-Driven**: Loose coupling between components
-- **WordPress Integration**: Direct publishing to WordPress sites
+### 核心能力
 
-## Architecture
+- ✅ **自动内容发布** - WordPress 集成 + Rank Math SEO
+- ✅ **GSC 数据驱动** - 低垂之果发现 + 机会评分 (P1)
+- ✅ **规模化 pSEO** - 10,000+ 页面自动生成 (P2)
+- ✅ **转化追踪** - 多触点归因 + ROI 分析 (P3)
+- ✅ **简易部署** - Admin 后台可视化配置，无需复杂环境变量
 
-### AI Agents
+---
 
-1. **Orchestrator Agent** - Strategic decision maker and coordinator
-2. **Market Researcher Agent** - Analyzes trends and competitors
-3. **Keyword Strategist Agent** - Discovers and prioritizes keywords
-4. **Content Creator Agent** - Generates SEO-optimized articles
-5. **Media Creator Agent** - Creates images and infographics
-6. **Publish Manager Agent** - Publishes content to WordPress
+## 📊 系统架构
 
-## Deployment
-
-### Production Deployment (Zeabur)
-
-For production deployment with automatic GitHub integration, see the comprehensive [Deployment Guide](DEPLOYMENT.md).
-
-**Quick Deploy to Zeabur:**
-
-1. Push your code to GitHub
-2. Sign up at [Zeabur](https://zeabur.com)
-3. Create a new project and add services (PostgreSQL, Redis, Git)
-4. Configure environment variables
-5. Zeabur automatically deploys on every push to main branch
-
-See [DEPLOYMENT.md](DEPLOYMENT.md) for detailed instructions.
-
-## Quick Start
-
-### Prerequisites
-
-- Python 3.10+
-- Docker and Docker Compose
-- OpenAI API key (or compatible provider)
-- WordPress site with REST API enabled
-
-### Installation
-
-1. Clone the repository:
-```bash
-git clone <repository-url>
-cd ai-marketing-system
+```
+┌─────────────────────────────────────────────────────────────┐
+│                     SEO Autopilot Platform                   │
+├─────────────────────────────────────────────────────────────┤
+│  P0: 基础发布  │  P1: GSC 驱动  │  P2: pSEO 工厂  │  P3: 转化闭环  │
+├─────────────────────────────────────────────────────────────┤
+│ • WordPress API │ • GSC 集成    │ • 组件系统     │ • 动态 CTA     │
+│ • Autopilot    │ • 5x Agents   │ • 质量门禁     │ • 归因分析     │
+│ • 任务队列      │ • 内链引擎    │ • 索引监控     │ • Lead 评分    │
+│ • Rank Math    │ • 机会评分    │ • 批量生成     │ • Outreach     │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-2. Copy environment template:
-```bash
-cp .env.example .env
-```
+---
 
-3. Configure your API keys in `.env`:
-```bash
-PRIMARY_AI_API_KEY=your_openai_api_key
-WORDPRESS_URL=https://your-site.com
-WORDPRESS_USERNAME=your_username
-WORDPRESS_PASSWORD=your_app_password
-```
+## 🛠️ 技术栈
 
-4. Start the system with Docker:
-```bash
-docker-compose up -d
-```
+### 后端
+- **FastAPI** - 异步 Web 框架
+- **SQLAlchemy** - ORM (PostgreSQL)
+- **APScheduler** - 定时任务
+- **Alembic** - 数据库迁移
 
-5. Access the API:
-```
-http://localhost:8000
-```
+### AI & 算法
+- **OpenAI GPT-4** - 内容生成
+- **LangChain** - LLM 编排
 
-6. Access the Admin Panel:
-```
-http://localhost:8000/admin
-```
+### 集成
+- **WordPress REST API** - 发布平台
+- **Google Search Console** - 数据源 (Service Account / OAuth)
+- **Rank Math** - SEO 优化
 
-## Admin Panel
+---
 
-The system includes a secure web-based admin panel for managing configuration without directly editing files.
+## 📦 快速部署
 
-### Admin Panel Features
+我们采用了简化的部署流程，推荐使用 **Docker** 或 **Zeabur/Railway** 等 PaaS 平台。
 
-- **Password-Protected Access**: Simple password authentication with JWT tokens
-- **Configuration Management**: Update all system settings through a web interface
-- **Real-time Updates**: Changes are saved to `.env` file automatically
-- **Rate Limiting**: Protection against brute force attacks (5 login attempts per 5 minutes)
-- **Secure Sessions**: HTTP-only cookies with configurable expiration
-
-### Admin Setup
-
-1. Set admin credentials in `.env`:
-```bash
-ADMIN_PASSWORD=your_secure_password_here
-ADMIN_SESSION_SECRET=your_random_secret_key_min_32_chars
-ADMIN_SESSION_EXPIRE_MINUTES=1440  # 24 hours
-```
-
-2. Generate a secure session secret:
-```bash
-python -c "import secrets; print(secrets.token_urlsafe(32))"
-```
-
-3. Access the admin panel at `http://localhost:8000/admin`
-
-### Admin Panel Usage
-
-1. **Login**: Enter your admin password to access the dashboard
-2. **View Configuration**: All current settings are loaded automatically
-3. **Update Settings**: Modify any configuration value in the form
-4. **Save Changes**: Click "Save All Changes" to persist updates
-5. **Restart**: Some changes require system restart to take full effect
-
-### Security Features
-
-- **Rate Limiting**: Login attempts limited to prevent brute force attacks
-- **JWT Authentication**: Secure token-based session management
-- **HTTP-Only Cookies**: Session tokens not accessible via JavaScript
-- **Password Protection**: Only authorized users can access configuration
-- **No Direct Access**: Admin panel requires authentication for all operations
-
-## Configuration
-
-### AI Provider Setup
-
-The system supports any OpenAI-compatible API. Configure in `.env`:
+### 1. 部署服务
+只需设置最基础的环境变量即可启动：
 
 ```bash
-# Primary Provider
-PRIMARY_AI_PROVIDER=openai
-PRIMARY_AI_BASE_URL=https://api.openai.com/v1
-PRIMARY_AI_API_KEY=your_key
-PRIMARY_AI_TEXT_MODEL=gpt-4o
-PRIMARY_AI_IMAGE_MODEL=dall-e-3
+# 必填
+DATABASE_URL=postgresql://user:pass@host:5432/db
+ADMIN_PASSWORD=your_secure_password
+ADMIN_SESSION_SECRET=your_random_secret
 
-# Fallback Provider (optional)
-FALLBACK_AI_PROVIDER=custom
-FALLBACK_AI_BASE_URL=https://your-api.com/v1
-FALLBACK_AI_API_KEY=your_key
+# 选填
+REDIS_URL=redis://host:6379/0
 ```
 
-### WordPress Setup
+### 2. 系统配置 (Admin Panel)
+服务启动后，访问 `/admin` 进入后台：
+1. 使用 `ADMIN_PASSWORD` 登录
+2. 进入 **Configuration** 页面
+3. 在界面上配置：
+   - WordPress URL & 账号密码
+   - OpenAI API Key
+   - Google Search Console 凭证
+   - 自动发布策略
 
-1. Install Yoast SEO or AIOSEO plugin
-2. Enable REST API
-3. Create application password
-4. Configure in `.env`
+点击保存即刻生效，无需重启服务。
 
-## Usage
+👉 详细指南请参阅 [DEPLOYMENT.md](DEPLOYMENT.md)
 
-### Basic Workflow
+---
 
-1. **Analyze Product Catalog**
-```bash
-curl -X POST http://localhost:8000/api/v1/agents/execute \
-  -H "Content-Type: application/json" \
-  -d '{
-    "agent_name": "orchestrator",
-    "task_type": "analyze_catalog",
-    "data": {
-      "products": ["glass bottles", "plastic bottles", "metal bottles"]
-    }
-  }'
-```
+## 📚 API 端点概览
 
-2. **Discover Keywords**
-```bash
-curl -X POST http://localhost:8000/api/v1/agents/execute \
-  -H "Content-Type: application/json" \
-  -d '{
-    "agent_name": "keyword_strategist",
-    "task_type": "discover_keywords",
-    "data": {
-      "products": ["glass bottles wholesale"]
-    }
-  }'
-```
-
-3. **Create Content**
-```bash
-curl -X POST http://localhost:8000/api/v1/content/create \
-  -H "Content-Type: application/json" \
-  -d '{
-    "keyword": "wholesale glass bottles for cosmetics",
-    "products": ["glass-bottle-100ml", "glass-bottle-250ml"],
-    "content_type": "blog_post"
-  }'
-```
-
-## Project Structure
-
-```
-ai-marketing-system/
-├── src/
-│   ├── agents/              # AI Agent implementations
-│   │   ├── orchestrator.py
-│   │   ├── market_researcher.py
-│   │   ├── keyword_strategist.py
-│   │   ├── content_creator.py
-│   │   ├── media_creator.py
-│   │   └── publish_manager.py
-│   ├── core/                # Core system components
-│   │   ├── ai_provider.py
-│   │   ├── event_bus.py
-│   │   └── plugin_manager.py
-│   ├── models/              # Database models
-│   ├── api/                 # REST API endpoints
-│   └── config/              # Configuration
-├── docker-compose.yml
-├── Dockerfile
-├── requirements.txt
-└── README.md
-```
-
-## Development
-
-### Running Locally
+### Autopilot (P0)
 
 ```bash
-# Create virtual environment
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-
-# Install dependencies
-pip install -r requirements.txt
-
-# Run the API
-uvicorn src.api.main:app --reload
+POST /api/v1/autopilot/start    # 启动自动发布
+POST /api/v1/autopilot/run-now  # 立即运行一次
+GET  /api/v1/autopilot/status   # 查看状态
 ```
 
-### Running Tests
+### Google Search Console (P1)
 
 ```bash
-pytest tests/
+POST /api/v1/gsc/auth           # 认证 GSC
+GET  /api/v1/gsc/opportunities  # 获取 SEO 机会
+POST /api/v1/gsc/sync           # 同步数据
 ```
 
-## Cost Estimation
+### pSEO (P2)
 
-### Monthly Operating Costs
+```bash
+POST /api/v1/pseo/generate      # 生成程序化页面
+GET  /api/v1/pseo/preview       # 预览生成
+```
 
-- **AI Services**: $50-100/month (50 articles)
-- **Keyword Research API**: $20-50/month
-- **Infrastructure**: $50-100/month
-- **Total**: $120-250/month
+---
 
-## Success Metrics
+## 📖 文档
 
-Target results within 6 months:
-- 300%+ increase in organic traffic
-- 50+ keywords in top 10
-- 5%+ CTR from blog to products
-- Cost per visitor < $0.50
+完整文档:
 
-## License
+- [部署指南](DEPLOYMENT.md)
+- [GitHub 集成指南](GITHUB_INTEGRATION.md)
+- [升级路线图](docs/UPGRADE_ROADMAP.md)
 
-MIT License
+---
 
-## Support
+## 📄 许可证
 
-For issues and questions, please open an issue on GitHub.
+MIT License - 详见 [LICENSE](LICENSE) 文件
