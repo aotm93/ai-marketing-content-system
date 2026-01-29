@@ -126,6 +126,9 @@ class ContentAction(Base, TimestampMixin):
     - Before/after comparison
     - Rollback capability
     - Change auditing
+    - Performance analysis (metrics before/after)
+    
+    Enhanced for P1: Content Refresh and CTR Optimization
     """
     __tablename__ = "content_actions"
     
@@ -133,29 +136,44 @@ class ContentAction(Base, TimestampMixin):
     
     # Action identification
     action_id = Column(String(36), unique=True, nullable=False, index=True)
-    action_type = Column(String(50), nullable=False, index=True)  # create, update, delete, publish, seo_update
+    action_type = Column(String(50), nullable=False, index=True)  # refresh, ctr_optimize, title_update, create, update, delete, publish, seo_update
     
     # Target content
     post_id = Column(Integer, nullable=True, index=True)
     post_url = Column(String(512), nullable=True)
     post_title = Column(String(255), nullable=True)
     
+    # Related query (for SEO optimizations)
+    query = Column(String(255), nullable=True, index=True)  # The search query this optimization targets
+    
     # Change details
-    before_snapshot = Column(JSON, nullable=True)
-    after_snapshot = Column(JSON, nullable=True)
+    before_snapshot = Column(JSON, nullable=True)  # {title, description, content_excerpt, meta}
+    after_snapshot = Column(JSON, nullable=True)   # {title, description, content_excerpt, meta}
     changes_summary = Column(Text, nullable=True)
     
+    # Reason for change
+    reason = Column(Text, nullable=True)  # Why this change was made (e.g., "Low CTR optimization", "Position 8-20 refresh")
+    
+    # Performance metrics (for analysis)
+    metrics_before = Column(JSON, nullable=True)  # {position, ctr, impressions, clicks, date}
+    metrics_after = Column(JSON, nullable=True)   # {position, ctr, impressions, clicks, date} - populated after time
+    
     # Status
-    status = Column(String(20), default="completed")  # pending, completed, failed, rolled_back
+    status = Column(String(20), default="active", index=True)  # active, completed, failed, rolled_back, superseded
+    
+    # Rollback information
+    rollback_at = Column(DateTime, nullable=True)
+    rollback_by = Column(String(100), nullable=True)
     
     # Related job
     job_run_id = Column(Integer, nullable=True)
     
     # User tracking
-    triggered_by = Column(String(50), default="system")
+    triggered_by = Column(String(50), default="system")  # system, manual, autopilot
+    applied_by = Column(String(100), nullable=True)  # User or agent name
     
     def __repr__(self):
-        return f"<ContentAction(id={self.id}, type={self.action_type}, post_id={self.post_id})>"
+        return f"<ContentAction(id={self.id}, type={self.action_type}, post_id={self.post_id}, status={self.status})>"
     
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -164,9 +182,35 @@ class ContentAction(Base, TimestampMixin):
             "action_type": self.action_type,
             "post_id": self.post_id,
             "post_title": self.post_title,
+            "query": self.query,
+            "reason": self.reason,
             "changes_summary": self.changes_summary,
             "status": self.status,
-            "created_at": self.created_at.isoformat() if self.created_at else None
+            "metrics_before": self.metrics_before,
+            "metrics_after": self.metrics_after,
+            "rollback_at": self.rollback_at.isoformat() if self.rollback_at else None,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "triggered_by": self.triggered_by
+        }
+    
+    def can_rollback(self) -> bool:
+        """Check if this action can be rolled back"""
+        return self.status == "active" and self.before_snapshot is not None
+    
+    def calculate_impact(self) -> Optional[Dict[str, Any]]:
+        """Calculate the impact of this change based on metrics"""
+        if not self.metrics_before or not self.metrics_after:
+            return None
+        
+        before = self.metrics_before
+        after = self.metrics_after
+        
+        return {
+            "position_change": after.get("position", 0) - before.get("position", 0),
+            "ctr_change": after.get("ctr", 0) - before.get("ctr", 0),
+            "clicks_change": after.get("clicks", 0) - before.get("clicks", 0),
+            "impressions_change": after.get("impressions", 0) - before.get("impressions", 0),
+            "improvement_percentage": ((after.get("clicks", 0) - before.get("clicks", 0)) / before.get("clicks", 1)) * 100 if before.get("clicks", 0) > 0 else 0
         }
 
 

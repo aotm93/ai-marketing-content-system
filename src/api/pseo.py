@@ -187,4 +187,62 @@ async def cancel_job(job_id: str):
         raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
 
 
+class BatchControlRequest(BaseModel):
+    """Batch job control request"""
+    action: Optional[str] = "draft"  # For rollback: "draft" or "delete"
+
+
+@router.post("/batch/{batch_id}/pause")
+async def pause_batch(batch_id: str):
+    """Pause specific batch job"""
+    success = batch_queue.pause_batch(batch_id)
+    if success:
+        return {"status": "success", "message": f"Batch {batch_id} paused"}
+    raise HTTPException(status_code=404, detail="Batch not found")
+
+
+@router.post("/batch/{batch_id}/resume")
+async def resume_batch(batch_id: str):
+    """Resume specific batch job"""
+    success = batch_queue.resume_batch(batch_id)
+    if success:
+        return {"status": "success", "message": f"Batch {batch_id} resumed"}
+    raise HTTPException(status_code=404, detail="Batch not found")
+
+
+@router.delete("/batch/{batch_id}/cancel")
+async def cancel_batch_endpoint(batch_id: str):
+    """Cancel specific batch job"""
+    success = batch_queue.cancel_batch(batch_id)
+    if success:
+        return {"status": "success", "message": f"Batch {batch_id} cancelled"}
+    raise HTTPException(status_code=404, detail="Batch not found")
+
+
+@router.post("/batch/{batch_id}/rollback")
+async def rollback_batch_endpoint(batch_id: str, request: BatchControlRequest):
+    """Rollback published posts for a batch"""
+    from src.integrations.wordpress_client import WordPressClient
+    from src.config import settings
+    import os
+    
+    # Assuming config is loaded, if not fall back to env or defaults
+    # settings object might not be fully initialized depending on app lifecycle, so we check safely
+    wp_url = getattr(settings, "wordpress_url", None) or os.getenv("WORDPRESS_URL")
+    wp_user = getattr(settings, "wordpress_username", None) or os.getenv("WORDPRESS_USERNAME")
+    wp_pass = getattr(settings, "wordpress_password", None) or os.getenv("WORDPRESS_PASSWORD")
+    
+    if not wp_url:
+        raise HTTPException(status_code=500, detail="WordPress configuration missing")
+
+    wp_client = WordPressClient(url=wp_url, username=wp_user, password=wp_pass)
+    
+    result = await batch_queue.rollback_batch(batch_id, wp_client, action=request.action)
+    
+    if result["success"]:
+        return result
+    else:
+        raise HTTPException(status_code=500, detail=result.get("message", "Rollback failed"))
+
+
 

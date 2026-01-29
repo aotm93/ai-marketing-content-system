@@ -217,3 +217,154 @@ async def update_config(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to update configuration: {str(e)}"
         )
+
+
+class SEOCheckRequest(BaseModel):
+    """SEO integration check request"""
+    post_id: int
+
+
+class SEOCheckResponse(BaseModel):
+    """SEO integration check response"""
+    success: bool
+    write_success: bool
+    meta_found: Dict[str, bool]
+    values: Dict[str, Optional[str]]
+    recommendation: str
+    errors: Optional[list] = None
+
+
+@router.post("/seo-check", response_model=SEOCheckResponse)
+async def seo_integration_check(
+    request: SEOCheckRequest,
+    admin: dict = Depends(get_current_admin)
+):
+    """
+    SEO 集成自检接口 (BUG-001 Fix)
+    
+    测试 Rank Math meta 写入和读取功能
+    
+    Steps:
+    1. 连接到 WordPress
+    2. 写入测试 meta 数据
+    3. 读取验证
+    4. 生成诊断报告
+    5. 提供修复建议
+    """
+    errors = []
+    
+    try:
+        # 1. 获取 WordPress 客户端
+        from src.integrations.wordpress_client import WordPressClient
+        
+        wp_client = WordPressClient(
+            url=settings.wordpress_url,
+            username=settings.wordpress_username,
+            password=settings.wordpress_password
+        )
+        
+        # 2. 写入测试 meta
+        test_meta = {
+            "rank_math_title": "SEO Test Title - Auto Generated",
+            "rank_math_description": "SEO Test Description - Auto Generated for Integration Check",
+            "rank_math_focus_keyword": "test keyword"
+        }
+        
+        write_success = False
+        try:
+            await wp_client.update_post_meta(request.post_id, test_meta)
+            write_success = True
+        except Exception as e:
+            errors.append(f"Meta write failed: {str(e)}")
+        
+        # 3. 读取验证
+        meta_found = {
+            "title": False,
+            "description": False,
+            "keyword": False
+        }
+        
+        values = {
+            "title": None,
+            "description": None,
+            "keyword": None
+        }
+        
+        try:
+            post = await wp_client.get_post(request.post_id)
+            meta = post.get("meta", {})
+            
+            # 检查是否找到 meta 字段
+            if "rank_math_title" in meta:
+                meta_found["title"] = True
+                values["title"] = meta.get("rank_math_title")
+            
+            if "rank_math_description" in meta:
+                meta_found["description"] = True
+                values["description"] = meta.get("rank_math_description")
+            
+            if "rank_math_focus_keyword" in meta:
+                meta_found["keyword"] = True
+                values["keyword"] = meta.get("rank_math_focus_keyword")
+                
+        except Exception as e:
+            errors.append(f"Meta read failed: {str(e)}")
+        
+        # 4. 生成诊断报告和建议
+        all_found = all(meta_found.values())
+        
+        if not write_success:
+            recommendation = (
+                "❌ Failed to write meta data to WordPress. "
+                "Please check:\n"
+                "1. WordPress URL is correct\n"
+                "2. WordPress credentials are valid\n"
+                "3. User has permission to edit posts\n"
+                "4. WordPress REST API is enabled"
+            )
+        elif not all_found:
+            missing = [k for k, v in meta_found.items() if not v]
+            recommendation = (
+                f"⚠️ Rank Math meta fields not accessible via REST API. "
+                f"Missing fields: {', '.join(missing)}\n\n"
+                "**Solution:**\n"
+                "Install the MU plugin to register meta fields:\n\n"
+                "1. Copy `docs/rank-math-mu-plugin.php` to your WordPress\n"
+                "2. Upload to `wp-content/mu-plugins/` directory\n"
+                "3. If `mu-plugins` doesn't exist, create it\n"
+                "4. No activation needed - MU plugins auto-load\n\n"
+                "See documentation: docs/rank-math-mu-plugin.php"
+            )
+        else:
+            recommendation = (
+                "✅ SEO integration is working correctly!\n\n"
+                "All Rank Math meta fields are accessible and writable.\n"
+                "You can now use automated SEO optimization features."
+            )
+        
+        return SEOCheckResponse(
+            success=all_found and write_success,
+            write_success=write_success,
+            meta_found=meta_found,
+            values=values,
+            recommendation=recommendation,
+            errors=errors if errors else None
+        )
+        
+    except Exception as e:
+        return SEOCheckResponse(
+            success=False,
+            write_success=False,
+            meta_found={"title": False, "description": False, "keyword": False},
+            values={"title": None, "description": None, "keyword": None},
+            recommendation=(
+                f"❌ SEO check failed with error: {str(e)}\n\n"
+                "Please ensure:\n"
+                "1. WordPress is accessible\n"
+                "2. Credentials are configured in Admin Panel\n"
+                "3. Rank Math SEO plugin is installed\n"
+                "4. WordPress REST API is enabled"
+            ),
+            errors=[str(e)]
+        )
+

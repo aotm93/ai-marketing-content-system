@@ -8,6 +8,11 @@ from src.api.autopilot import router as autopilot_router
 from src.api.conversion import router as conversion_router
 from src.api.pseo import router as pseo_router
 from src.api.gsc import router as gsc_router
+from src.api.indexing import router as indexing_router
+from src.api.opportunities import router as opportunities_router
+from src.api.topic_map import router as topic_map_router
+from src.api.quality_gate import router as quality_gate_router
+from src.api.cannibalization import router as cannibalization_router
 from src.config.utils import load_settings_from_db, init_system_config
 from src.core.database import SessionLocal
 
@@ -117,6 +122,11 @@ app.include_router(autopilot_router)
 app.include_router(conversion_router)
 app.include_router(pseo_router)
 app.include_router(gsc_router)
+app.include_router(indexing_router)
+app.include_router(opportunities_router)
+app.include_router(topic_map_router)
+app.include_router(quality_gate_router)
+app.include_router(cannibalization_router)
 
 # CORS middleware
 app.add_middleware(

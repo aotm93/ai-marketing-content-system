@@ -21,6 +21,6 @@ def get_db():
 def init_db():
     """Initialize database tables"""
     # Import all models here to ensure they are registered with Base.metadata
-    # import src.models.content # P1/P2 Models if they exist (not created yet or used elsewhere)
+    import src.models
     
     Base.metadata.create_all(bind=engine)

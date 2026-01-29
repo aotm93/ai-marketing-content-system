@@ -12,12 +12,13 @@ Features:
 """
 
 import logging
+from enum import Enum
 from typing import Dict, Any, List, Optional
 from dataclasses import dataclass, field
 from datetime import datetime
 import asyncio
 
-from .dimension_model import DimensionModel, PageCombination, CombinationFilter
+from .dimension_model import DimensionModel, PageCombination, CombinationFilter, create_bottle_dimension_model
 from .components import PageTemplate
 from src.agents.quality_gate import QualityGateAgent
 from src.integrations.publisher_adapter import PublisherFactory, PublishableContent
@@ -307,6 +308,16 @@ class pSEOFactory:
         return preview
 
 
+class BatchStatus(str, Enum):
+    """Batch job status"""
+    PENDING = "pending"
+    PROCESSING = "processing"
+    PAUSED = "paused"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
 class BatchJobQueue:
     """
     Queue for batch pSEO generation jobs
@@ -318,6 +329,10 @@ class BatchJobQueue:
         self.current_job: Optional[Dict[str, Any]] = None
         self.paused: bool = False
         self.redis_client = None
+        
+        # Track individual batch statuses and published posts for rollback
+        self.batch_statuses: Dict[str, BatchStatus] = {}
+        self.published_entries: Dict[str, List[int]] = {}  # batch_id -> list of wordpress post_ids
         
         # Initialize Redis if configured
         redis_url = redis_url or os.getenv("REDIS_URL")
@@ -340,17 +355,21 @@ class BatchJobQueue:
         
         job = {
             "job_id": job_id,
-            "config": job_config, # Note: job_config must be serializable
-            "status": "queued",
+            "config": job_config,
+            "status": BatchStatus.PENDING.value,
             "created_at": datetime.now().isoformat(),
             "pages_generated": 0,
             "pages_published": 0,
             "errors": []
         }
         
+        self.batch_statuses[job_id] = BatchStatus.PENDING
+        self.published_entries[job_id] = []
+        
         if self.redis_client:
             try:
                 self.redis_client.rpush("pseo:batch_queue", json.dumps(job))
+                self.redis_client.set(f"pseo:job:{job_id}:status", BatchStatus.PENDING.value)
                 logger.info(f"Added batch job {job_id} to Redis queue")
             except Exception as e:
                 logger.error(f"Redis error: {e}. Fallback to memory.")
@@ -363,13 +382,12 @@ class BatchJobQueue:
     
     async def process_queue(self):
         """Process jobs in queue"""
+        # This simple processor only handles one job at a time
         while not self.paused:
             job = None
             
             # Fetch job
             if self.redis_client:
-                # Non-blocking pop for async loop compatibility
-                # In production, use blocking pop with timeout or separate worker
                 try:
                     job_data = self.redis_client.lpop("pseo:batch_queue")
                     if job_data:
@@ -380,49 +398,49 @@ class BatchJobQueue:
                 job = self.jobs.pop(0)
             
             if not job:
-                # No jobs, wait and check again
                 await asyncio.sleep(2)
                 continue
 
+            job_id = job["job_id"]
             self.current_job = job
+            self.batch_statuses[job_id] = BatchStatus.PROCESSING
             
-            logger.info(f"Processing batch job: {job['job_id']}")
-            job["status"] = "processing"
+            logger.info(f"Processing batch job: {job_id}")
+            job["status"] = BatchStatus.PROCESSING.value
             
-            # Update status in Redis (optional persistence for running jobs)
             if self.redis_client:
-                # Store current job in a separate key for monitoring
-                self.redis_client.set(f"pseo:job:{job['job_id']}", json.dumps(job), ex=86400)
+                self.redis_client.set(f"pseo:job:{job_id}", json.dumps(job), ex=86400)
+                self.redis_client.set(f"pseo:job:{job_id}:status", BatchStatus.PROCESSING.value)
             
             try:
                 # 1. Initialize dependencies
-                # Handle nested config object from JSON deserialization
                 config_data = job["config"]
                 if isinstance(config_data, dict):
-                    # Reconstruct FactoryConfig object if it was serialized as dict
                     config = FactoryConfig(**{k: v for k, v in config_data.items() if k in FactoryConfig.__annotations__})
                 else:
-                    config = config_data # Assuming it's already an object if from memory
+                    config = config_data
 
-                model_name = job.get("model_name", "bottle") # Default for safety
+                model_name = job.get("model_name", "bottle")
                 template_id = job.get("template_id", "default")
                 max_pages = job.get("max_pages")
                 
-                # Reconstruct Factory (Simplified for MVP - direct instantiation)
-                # In prod, use a ModelFactory and TemplateRepository
+                # Check for cancellation before starting work
+                if self._check_batch_interrupt(job_id):
+                    logger.info(f"Job {job_id} was interrupted before start")
+                    continue
+
+                # Factory Setup
                 if model_name == "bottle":
                     model = create_bottle_dimension_model()
                 else:
-                    raise ValueError(f"Unknown model: {model_name}")
+                    # In a real app we might load dynamic models
+                    model = create_bottle_dimension_model() 
                 
-                # Create default template
                 from src.pseo.components import create_default_template
                 template = create_default_template(template_id)
-                
                 factory = pSEOFactory(model, template, config)
                 
-                # Initialize Publisher (WordPress)
-                # Using env vars - in prod, load from secure vault
+                # Publisher Setup
                 publisher = PublisherFactory.create("wordpress", {
                     "url": os.getenv("WORDPRESS_URL", "http://localhost:8000"),
                     "username": os.getenv("WORDPRESS_USERNAME", "admin"),
@@ -430,44 +448,49 @@ class BatchJobQueue:
                     "seo_plugin": "rank_math"
                 })
                 
-                # Health check
-                health = await publisher.health_check()
-                if health.get("status") == "error":
-                     raise ConnectionError(f"Publisher connection failed: {health}")
-
                 # 2. Generate pages in batches
-                # Reuse the factory logic but intercept results for publishing
                 combinations = model.generate_all_combinations(max_combinations=max_pages)
-                
                 batch_size = config.max_pages_per_batch
                 total_combos = len(combinations)
-                logger.info(f" Job {job['job_id']}: Generating {total_combos} pages in batches of {batch_size}")
-
+                
                 for i in range(0, total_combos, batch_size):
-                    if self.paused:
-                        # Re-queue remaining work? For now, just stop.
-                        logger.info("Queue paused, stopping job processing")
-                        # Push job back to front? Or just break. 
-                        # Breaking means job is "partial". Let's handle simple pause.
+                    # Check for Job-level Pause/Cancel
+                    interrupt_action = self._check_batch_interrupt(job_id)
+                    while interrupt_action == "pause":
+                        logger.info(f"Job {job_id} paused. Waiting...")
+                        await asyncio.sleep(5)
+                        interrupt_action = self._check_batch_interrupt(job_id)
+                        # Global queue pause also affects this loop? 
+                        # Ideally, global pause stops 'process_queue' loop at top level.
+                        # This 'await asyncio.sleep' allows other tasks to run.
+                    
+                    if interrupt_action == "cancel":
+                        logger.info(f"Job {job_id} cancelled by user")
+                        job["status"] = BatchStatus.CANCELLED.value
+                        self.batch_statuses[job_id] = BatchStatus.CANCELLED
                         break
-
+                    
+                    if self.paused:
+                        # Global queue pause -> pause job processing but keep job active
+                        while self.paused:
+                             await asyncio.sleep(2)
+                    
+                    # Process Batch
                     batch_combos = combinations[i:i+batch_size]
                     batch_result = await factory._generate_batch(batch_combos)
                     
                     # 3. Publish generated pages
+                    current_batch_post_ids = []
                     for page_data in batch_result.generated_pages:
                         try:
-                            # Map to PublishableContent
                             content = PublishableContent(
                                 title=page_data["title"],
                                 content=page_data["content"],
                                 slug=page_data["slug"],
                                 status="draft" if not config.auto_publish else "publish",
-                                # SEO Meta
                                 seo_title=page_data.get("title"),
                                 seo_description=page_data.get("meta_description"),
                                 focus_keyword=page_data.get("title_parts", [])[0] if page_data.get("title_parts") else None,
-                                # Taxonomy (using dimension values as tags)
                                 tags=page_data.get("combination", {}).values()
                             )
                             
@@ -475,80 +498,151 @@ class BatchJobQueue:
                             
                             if pub_result.status == "success":
                                 job["pages_published"] += 1
-                                logger.info(f"Published: {content.slug}")
+                                if pub_result.post_id:
+                                    current_batch_post_ids.append(pub_result.post_id)
                             else:
-                                error_msg = f"Failed to publish {content.slug}: {pub_result.error}"
-                                logger.error(error_msg)
-                                job["errors"].append(error_msg)
+                                job["errors"].append(f"Failed to publish {content.slug}: {pub_result.error}")
                                 
                         except Exception as e:
-                            logger.error(f"Publishing error for {page_data.get('slug')}: {e}")
-                            job["errors"].append(str(e))
-                            
+                            job["errors"].append(f"Publishing error {page_data.get('slug')}: {str(e)}")
+                    
+                    # Track published IDs for rollback
+                    if job_id in self.published_entries:
+                        self.published_entries[job_id].extend(current_batch_post_ids)
+                    else:
+                        self.published_entries[job_id] = current_batch_post_ids
+                        
                     job["pages_generated"] += len(batch_result.generated_pages)
                     
-                    # Update progress (in memory)
-                    self.current_job = job 
-                    
-                job["status"] = "completed"
-                logger.info(f"Job {job['job_id']} completed. Generated: {job['pages_generated']}, Published: {job['pages_published']}")
+                    # Update progress
+                    self.current_job = job
+                    if self.redis_client:
+                        self.redis_client.set(f"pseo:job:{job_id}", json.dumps(job), ex=86400)
+                        
+                if job["status"] != BatchStatus.CANCELLED.value:
+                    job["status"] = BatchStatus.COMPLETED.value
+                    self.batch_statuses[job_id] = BatchStatus.COMPLETED
                 
             except Exception as e:
-                logger.error(f"Job {job['job_id']} failed: {e}")
-                job["status"] = "failed"
+                logger.error(f"Job {job_id} failed: {e}")
+                job["status"] = BatchStatus.FAILED.value
+                self.batch_statuses[job_id] = BatchStatus.FAILED
                 job["errors"].append(str(e))
             
             finally:
-                # Cleanup / Final Status Update
                 if self.redis_client:
-                    try:
-                        # Update final status in Redis
-                        self.redis_client.set(f"pseo:job:{job['job_id']}", json.dumps(job), ex=86400 * 7) # Keep 7 days
-                    except Exception as e:
-                        logger.error(f"Failed to update job status in Redis: {e}")
+                    self.redis_client.set(f"pseo:job:{job_id}", json.dumps(job), ex=86400 * 7)
+                    self.redis_client.set(f"pseo:job:{job_id}:status", job["status"])
                         
                 self.current_job = None
     
+    def _check_batch_interrupt(self, job_id: str) -> Optional[str]:
+        """Check if batch should be paused or cancelled"""
+        # Check local status
+        status = self.batch_statuses.get(job_id)
+        
+        # Check Redis if available (source of truth for distributed)
+        if self.redis_client:
+            redis_status = self.redis_client.get(f"pseo:job:{job_id}:status")
+            if redis_status:
+                status = BatchStatus(redis_status)
+                # Sync back to local
+                self.batch_statuses[job_id] = status
+        
+        if status == BatchStatus.PAUSED:
+            return "pause"
+        if status == BatchStatus.CANCELLED:
+            return "cancel"
+        return None
+
+    def pause_batch(self, batch_id: str) -> bool:
+        """Pause a specific batch job"""
+        if batch_id in self.batch_statuses:
+            self.batch_statuses[batch_id] = BatchStatus.PAUSED
+            if self.redis_client:
+                self.redis_client.set(f"pseo:job:{batch_id}:status", BatchStatus.PAUSED.value)
+            logger.info(f"Paused batch {batch_id}")
+            return True
+        return False
+
+    def resume_batch(self, batch_id: str) -> bool:
+        """Resume a specific batch job"""
+        current = self.batch_statuses.get(batch_id)
+        if current == BatchStatus.PAUSED:
+            self.batch_statuses[batch_id] = BatchStatus.PROCESSING
+            if self.redis_client:
+                self.redis_client.set(f"pseo:job:{batch_id}:status", BatchStatus.PROCESSING.value)
+            logger.info(f"Resumed batch {batch_id}")
+            return True
+        return False
+
+    def cancel_batch(self, batch_id: str) -> bool:
+        """Cancel a specific batch job"""
+        self.batch_statuses[batch_id] = BatchStatus.CANCELLED
+        if self.redis_client:
+            self.redis_client.set(f"pseo:job:{batch_id}:status", BatchStatus.CANCELLED.value)
+        
+        # Also remove from queue if pending
+        if not self.redis_client: # Memory queue removal
+            for i, job in enumerate(self.jobs):
+                if job["job_id"] == batch_id:
+                    self.jobs.pop(i)
+                    return True
+        return True
+
+    async def rollback_batch(self, batch_id: str, wp_client, action: str = "draft") -> Dict[str, Any]:
+        """Rollback published posts for a batch"""
+        post_ids = self.published_entries.get(batch_id, [])
+        if not post_ids:
+             # Try recovering from Redis if not in memory
+             if self.redis_client:
+                 # TODO: We would need to store published_ids in Redis to make this durable
+                 pass 
+             return {"success": True, "message": "No posts to rollback", "count": 0}
+
+        success_count = 0
+        fail_count = 0
+        
+        for pid in post_ids:
+            try:
+                if action == "delete":
+                    await wp_client.delete_post(pid)
+                else:
+                    await wp_client.update_post(pid, {"status": "draft"})
+                success_count += 1
+            except Exception as e:
+                logger.error(f"Rollback failed for post {pid}: {e}")
+                fail_count += 1
+        
+        # Mark batch as rolled back? Or just log it.
+        logger.info(f"Rolled back batch {batch_id}: {success_count} success, {fail_count} failed")
+        
+        return {
+            "success": True,
+            "processed": len(post_ids),
+            "succeeded": success_count,
+            "failed": fail_count
+        }
+
+    # Global Queue Control
     def pause_queue(self):
-        """Pause queue processing"""
         self.paused = True
-        logger.info("Batch queue paused")
     
     def resume_queue(self):
-        """Resume queue processing"""
         self.paused = False
-        logger.info("Batch queue resumed")
     
     def get_queue_status(self) -> Dict[str, Any]:
-        """Get current queue status"""
+        """Get overview of queue"""
+        # Logic similar to before but includes batch status overview
         pending_count = 0
-        pending_jobs = []
-        
         if self.redis_client:
-            try:
-                pending_count = self.redis_client.llen("pseo:batch_queue")
-                # Peek first 5 jobs
-                jobs_data = self.redis_client.lrange("pseo:batch_queue", 0, 4)
-                pending_jobs = [json.loads(j)["job_id"] for j in jobs_data]
-            except Exception:
-                pass
+             pending_count = self.redis_client.llen("pseo:batch_queue")
         else:
-            pending_count = len(self.jobs)
-            pending_jobs = [j["job_id"] for j in self.jobs]
-            
+             pending_count = len(self.jobs)
+             
         return {
-            "total_jobs": pending_count,
-            "current_job": self.current_job["job_id"] if self.current_job else None,
             "paused": self.paused,
-            "pending_jobs": pending_jobs,
-            "persistence": "redis" if self.redis_client else "memory"
+            "pending_jobs": pending_count,
+            "current_job_id": self.current_job["job_id"] if self.current_job else None,
+            "active_batches": {k: v.value for k, v in self.batch_statuses.items()}
         }
-    
-    def cancel_job(self, job_id: str) -> bool:
-        """Cancel a pending job"""
-        for i, job in enumerate(self.jobs):
-            if job["job_id"] == job_id:
-                removed = self.jobs.pop(i)
-                logger.info(f"Cancelled job: {job_id}")
-                return True
-        return False

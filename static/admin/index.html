@@ -49,15 +49,56 @@
 
             <!-- New Dashboard Protocol -->
             <div class="dashboard-banner"
-                style="background: linear-gradient(135deg, #6366f1, #a855f7); color: white; padding: 20px; border-radius: 8px; margin-bottom: 30px; display: flex; justify-content: space-between; align-items: center;">
+                style="background: linear-gradient(135deg, #6366f1, #a855f7); color: white; padding: 20px; border-radius: 8px; margin-bottom: 30px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 15px;">
                 <div>
                     <h2 style="margin: 0; font-size: 1.5rem;">🎉 System Upgraded to v2.0</h2>
-                    <p style="margin: 5px 0 0 0; opacity: 0.9;">The new React Dashboard is ready. Use this panel for
-                        configuration only.</p>
+                    <p style="margin: 5px 0 0 0; opacity: 0.9;">Use this panel for system configuration. API docs
+                        available at <a href="/docs" style="color: white; text-decoration: underline;">/docs</a></p>
                 </div>
-                <a href="/dashboard/" target="_blank" class="btn"
-                    style="background: white; color: #6366f1; font-weight: bold; text-decoration: none; padding: 12px 24px; border-radius: 6px;">🚀
-                    Open Cockpit</a>
+                <div style="display: flex; gap: 10px;">
+                    <a href="/docs" target="_blank" class="btn"
+                        style="background: white; color: #6366f1; font-weight: bold; text-decoration: none; padding: 12px 24px; border-radius: 6px;">📚
+                        API Docs</a>
+                    <a href="/health" target="_blank" class="btn"
+                        style="background: rgba(255,255,255,0.2); color: white; font-weight: bold; text-decoration: none; padding: 12px 24px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.3);">❤️
+                        Health</a>
+                </div>
+            </div>
+
+
+            <!-- Quick Actions Grid -->
+            <div
+                style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; margin-bottom: 30px;">
+                <a href="opportunities.html" style="text-decoration: none;">
+                    <div style="background: linear-gradient(135deg, #22c55e, #16a34a); padding: 20px; border-radius: 12px; color: white; transition: transform 0.2s; cursor: pointer;"
+                        onmouseover="this.style.transform='translateY(-3px)'"
+                        onmouseout="this.style.transform='translateY(0)'">
+                        <div style="font-size: 2rem; margin-bottom: 10px;">🎯</div>
+                        <h3 style="margin: 0 0 8px 0; font-size: 1.2rem;">Opportunity Pool</h3>
+                        <p style="margin: 0; opacity: 0.9; font-size: 0.9rem;">Browse and execute SEO opportunities from
+                            GSC data</p>
+                    </div>
+                </a>
+                <a href="/docs" target="_blank" style="text-decoration: none;">
+                    <div style="background: linear-gradient(135deg, #3b82f6, #1d4ed8); padding: 20px; border-radius: 12px; color: white; transition: transform 0.2s; cursor: pointer;"
+                        onmouseover="this.style.transform='translateY(-3px)'"
+                        onmouseout="this.style.transform='translateY(0)'">
+                        <div style="font-size: 2rem; margin-bottom: 10px;">📚</div>
+                        <h3 style="margin: 0 0 8px 0; font-size: 1.2rem;">API Documentation</h3>
+                        <p style="margin: 0; opacity: 0.9; font-size: 0.9rem;">Explore the API endpoints and test
+                            requests</p>
+                    </div>
+                </a>
+                <a href="/api/v1/cannibalization/health" target="_blank" style="text-decoration: none;">
+                    <div style="background: linear-gradient(135deg, #f59e0b, #d97706); padding: 20px; border-radius: 12px; color: white; transition: transform 0.2s; cursor: pointer;"
+                        onmouseover="this.style.transform='translateY(-3px)'"
+                        onmouseout="this.style.transform='translateY(0)'">
+                        <div style="font-size: 2rem; margin-bottom: 10px;">🔍</div>
+                        <h3 style="margin: 0 0 8px 0; font-size: 1.2rem;">SEO Health Check</h3>
+                        <p style="margin: 0; opacity: 0.9; font-size: 0.9rem;">Cannibalization detection and topic
+                            mapping</p>
+                    </div>
+                </a>
             </div>
 
             <!-- Configuration Sections -->
