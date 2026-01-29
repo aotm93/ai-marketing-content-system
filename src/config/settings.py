@@ -61,8 +61,9 @@ class Settings(BaseSettings):
     metrics_port: int = 9090
 
     # Admin Authentication
-    admin_password: str
-    admin_session_secret: str
+    # IMPORTANT: Set these via environment variables in production!
+    admin_password: str = "admin123"  # Default for dev, CHANGE in production
+    admin_session_secret: str = "dev-secret-change-in-production-min-32-chars"
     admin_session_expire_minutes: int = 1440  # 24 hours
 
     # ==================== Autopilot Settings (P0-13) ====================

@@ -34,6 +34,13 @@ async def lifespan(app: FastAPI):
     # Startup
     logger.info("Starting AI Marketing Content System...")
     
+    # Security Warning for default credentials
+    if settings.environment == "production":
+        if settings.admin_password == "admin123":
+            logger.warning("⚠️  SECURITY WARNING: Using default admin password in production! Set ADMIN_PASSWORD env var.")
+        if "dev-secret" in settings.admin_session_secret:
+            logger.warning("⚠️  SECURITY WARNING: Using default session secret in production! Set ADMIN_SESSION_SECRET env var.")
+    
     # Initialize DB (P3)
     try:
         from src.core.database import init_db
