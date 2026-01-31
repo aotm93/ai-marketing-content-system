@@ -73,16 +73,16 @@ async def lifespan(app: FastAPI):
             config = AutopilotConfig(
                 enabled=settings.autopilot_enabled,
                 mode=mode,
-                publish_interval_minutes=settings.publish_interval_minutes,
-                max_posts_per_day=settings.max_posts_per_day,
-                max_concurrent_agents=settings.max_concurrent_jobs,
+                publish_interval_minutes=int(settings.publish_interval_minutes),
+                max_posts_per_day=int(settings.max_posts_per_day),
+                max_concurrent_agents=int(settings.max_concurrent_jobs),
                 auto_publish=settings.auto_publish,
-                require_seo_score=settings.require_seo_score,
-                require_word_count=settings.require_word_count,
-                max_tokens_per_day=settings.max_tokens_per_day,
-                pause_on_errors=settings.pause_on_consecutive_errors,
-                active_hours_start=settings.active_hours_start,
-                active_hours_end=settings.active_hours_end
+                require_seo_score=int(settings.require_seo_score),
+                require_word_count=int(settings.require_word_count),
+                max_tokens_per_day=int(settings.max_tokens_per_day) if settings.max_tokens_per_day else 100000,
+                pause_on_errors=int(settings.pause_on_consecutive_errors),
+                active_hours_start=int(settings.active_hours_start),
+                active_hours_end=int(settings.active_hours_end)
             )
             
             autopilot = configure_autopilot(config)

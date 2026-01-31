@@ -744,12 +744,108 @@ async def internal_linking_job(data: Dict[str, Any]) -> Dict[str, Any]:
     return result
 
 
+
+async def cannibalization_analysis_job(data: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Cannibalization detection job (BUG-013)
+    
+    Periodically scans for keyword cannibalization using GSC data
+    and generates a report.
+    """
+    logger.info("Starting cannibalization detection job")
+    
+    result = {
+        "job_type": "cannibalization_analysis",
+        "started_at": datetime.now().isoformat(),
+        "issues_found": 0
+    }
+    
+    try:
+        from src.services.cannibalization import CannibalizationDetector
+        detector = CannibalizationDetector()
+        
+        # Fetch GSC data
+        gsc_data_dicts = []
+        if settings.gsc_site_url and settings.gsc_credentials_json:
+            try:
+                from src.integrations.gsc_client import GSCClient
+                gsc = GSCClient(
+                    site_url=settings.gsc_site_url,
+                    credentials_json=settings.gsc_credentials_json
+                )
+                
+                # Fetch last 30 days of data
+                end_date = datetime.now().strftime('%Y-%m-%d')
+                start_date = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
+                
+                queries = gsc.get_search_analytics(
+                    start_date=start_date,
+                    end_date=end_date,
+                    dimensions=["query", "page"],
+                    row_limit=5000
+                )
+                
+                gsc_data_dicts = [q.to_dict() for q in queries]
+                result["rows_fetched"] = len(gsc_data_dicts)
+                
+            except Exception as e:
+                logger.error(f"Failed to fetch GSC data: {e}")
+                return {
+                    "status": "failed", 
+                    "error": f"GSC fetch failed: {str(e)}",
+                    "completed_at": datetime.now().isoformat()
+                }
+        else:
+            return {
+                "status": "skipped", 
+                "message": "GSC not configured",
+                "completed_at": datetime.now().isoformat()
+            }
+            
+        if not gsc_data_dicts:
+            return {
+                "status": "skipped",
+                "message": "No GSC data available",
+                "completed_at": datetime.now().isoformat()
+            }
+
+        # Run analysis
+        report = await detector.analyze(
+            gsc_data=gsc_data_dicts, 
+            min_impressions=data.get("min_impressions", 20)
+        )
+        
+        # Log findings
+        result.update({
+            "status": "success",
+            "issues_found": report.total_issues,
+            "critical_issues": report.issues_by_severity.get("critical", 0),
+            "high_issues": report.issues_by_severity.get("high", 0),
+            "health_score": report.health_score,
+            "summary": report.summary,
+            "top_priorities": report.top_priorities
+        })
+        
+        logger.info(f"Cannibalization analysis complete: {report.total_issues} issues found")
+        
+    except Exception as e:
+        logger.error(f"Cannibalization analysis failed: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        result["status"] = "failed"
+        result["error"] = str(e)
+    
+    result["completed_at"] = datetime.now().isoformat()
+    return result
+
+
 # Job registry for easy registration with autopilot
 JOB_REGISTRY = {
     "content_generation": content_generation_job,
     "seo_optimization": seo_optimization_job,
     "content_refresh": content_refresh_job,
     "internal_linking": internal_linking_job,
+    "cannibalization_analysis": cannibalization_analysis_job,
 }
 
 

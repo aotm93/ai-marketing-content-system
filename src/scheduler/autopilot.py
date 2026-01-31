@@ -257,6 +257,15 @@ class AutopilotScheduler:
             replace_existing=True
         )
         
+        # Cannibalization scan (Weekly, Sunday at 3 AM)
+        self.scheduler.add_job(
+            self._run_cannibalization_scan,
+            CronTrigger(day_of_week='sun', hour=3, minute=0),
+            id="cannibalization_scan",
+            name="Cannibalization Scan",
+            replace_existing=True
+        )
+        
         logger.info(f"Scheduled jobs: interval={self.config.publish_interval_minutes}min")
     
     def _reschedule_jobs(self):
@@ -331,6 +340,25 @@ class AutopilotScheduler:
         self._successful_runs = 0
         
         return summary
+    
+    async def _run_cannibalization_scan(self):
+        """Execute cannibalization detection scan"""
+        logger.info("Starting scheduled cannibalization scan")
+        
+        try:
+            # Get the job function
+            if "cannibalization_analysis" in self._job_functions:
+                job_func = self._job_functions["cannibalization_analysis"]
+                await self.job_runner.run_job(
+                    job_type="cannibalization_analysis",
+                    job_func=job_func,
+                    job_data={"min_impressions": 50}
+                )
+            else:
+                logger.warning("Cannibalization analysis job not registered")
+                    
+        except Exception as e:
+            logger.error(f"Scheduled cannibalization scan failed: {e}")
     
     async def run_once(self, job_type: str = "content_generation", job_data: Optional[Dict] = None) -> Dict[str, Any]:
         """
