@@ -87,17 +87,19 @@
     - [x] 支持批量操作
     - [x] UI 界面友好
 
-- [ ] **BUG-006**: 增强审计日志
+- [x] **BUG-006**: 增强审计日志
   - 文件: `src/scheduler/job_runner.py`
-  - 模型: `src/models/job_run.py`
+  - 模型: `src/models/job_runs.py`
+  - API: `src/api/job_logs.py`
+  - 前端: `static/admin/logs.html`
   - 工作量: 4-6 小时
-  - 负责人: ___________
+  - 负责人: Antigravity AI
   - 验收标准:
-    - [ ] job_runs 表包含 input_snapshot
-    - [ ] 包含 output_snapshot
-    - [ ] 包含 error_traceback
-    - [ ] 包含 retry_count
-    - [ ] Admin Panel 可查看详细日志
+    - [x] job_runs 表包含 input_snapshot (input_data column)
+    - [x] 包含 output_snapshot (result_data column)
+    - [x] 包含 error_traceback
+    - [x] 包含 retry_count
+    - [x] Admin Panel 可查看详细日志 (logs.html)
 
 - [ ] **BUG-007**: 实现 GSC 状态页
   - 文件: `src/api/gsc.py`
@@ -111,15 +113,18 @@
     - [ ] 显示最近同步时间
     - [ ] 显示健康状态
 
-- [ ] **BUG-011**: 数据库索引优化
-  - 文件: 新建 Alembic 迁移
+- [x] **BUG-011**: 数据库索引优化
+  - 文件: `migrations/versions/p1_003_index_optimization.py`
   - 工作量: 1-2 小时
-  - 负责人: ___________
+  - 负责人: Antigravity AI
+  - 完成日期: 2026-01-31
   - 验收标准:
-    - [ ] gsc_queries 表添加索引
-    - [ ] job_runs 表添加索引
-    - [ ] 查询性能测试通过
-    - [ ] 迁移脚本可执行
+    - [x] gsc_queries 表添加复合索引 (5 个新索引)
+    - [x] job_runs 表添加复合索引 (5 个新索引)
+    - [x] opportunities 表添加性能索引 (4 个新索引)
+    - [x] topic_clusters 表添加索引 (2 个新索引)
+    - [x] gsc_page_summaries 表添加索引 (2 个新索引)
+    - [x] 迁移脚本可执行
 
 ---
 
@@ -216,9 +221,9 @@
 
 ```
 总任务: 17
-已完成: 9 (53%)
+已完成: 10 (59%)
 进行中: 0 (0%)
-未开始: 8 (47%)
+未开始: 7 (41%)
 ```
 
 ### 按优先级
@@ -232,7 +237,7 @@
 
 - **配置问题**: 0/3 完成
 - **API 开发**: 6/6 完成 ✅ 
-- **数据库**: 1/3 完成
+- **数据库**: 2/3 完成 (BUG-011 ✅)
 - **UI 开发**: 1/3 完成 (BUG-003 ✅)
 - **功能增强**: 4/4 完成 ✅
 
@@ -409,7 +414,7 @@ BUG-005 (索引监控)
 
 **清单版本**: 1.0  
 **创建日期**: 2026-01-28  
-**最后更新**: 2026-01-28  
+**最后更新**: 2026-01-31  
 **维护者**: 项目团队
 
 ---

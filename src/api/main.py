@@ -13,6 +13,7 @@ from src.api.opportunities import router as opportunities_router
 from src.api.topic_map import router as topic_map_router
 from src.api.quality_gate import router as quality_gate_router
 from src.api.cannibalization import router as cannibalization_router
+from src.api.job_logs import router as job_logs_router
 from src.config.utils import load_settings_from_db, init_system_config
 from src.core.database import SessionLocal
 
@@ -134,6 +135,7 @@ app.include_router(opportunities_router)
 app.include_router(topic_map_router)
 app.include_router(quality_gate_router)
 app.include_router(cannibalization_router)
+app.include_router(job_logs_router)
 
 # CORS middleware
 app.add_middleware(

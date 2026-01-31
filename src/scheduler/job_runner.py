@@ -73,9 +73,12 @@ class JobResult:
     completed_at: Optional[datetime] = None
     duration_seconds: Optional[float] = None
     result_data: Dict[str, Any] = field(default_factory=dict)
+    input_data: Dict[str, Any] = field(default_factory=dict)  # BUG-006: Added input snapshot
     error_message: Optional[str] = None
     error_traceback: Optional[str] = None
     retry_count: int = 0
+    tokens_used: Optional[int] = None  # BUG-006: Track token usage
+    triggered_by: str = "scheduler"  # BUG-006: Track trigger source
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for storage"""
@@ -249,6 +252,10 @@ class JobRunner:
         # Execute with concurrency control
         result = await self._execute_with_retry(job_id, job_type, job_func, job_data, started_at)
         
+        # BUG-006: Set input data for audit logging
+        result.input_data = job_data
+        result.triggered_by = "manual" if skip_rate_limit else "scheduler"
+        
         # Record execution if successful
         if result.status == JobStatus.SUCCESS and not skip_rate_limit:
             self.rate_limiter.record_execution()
@@ -259,6 +266,9 @@ class JobRunner:
         # Keep only last 100 results in memory
         if len(self.job_history) > 100:
             self.job_history = self.job_history[-100:]
+        
+        # BUG-006: Persist to database for audit logging
+        await self._persist_job_result(result)
         
         return result
     
@@ -397,6 +407,54 @@ class JobRunner:
             if job.status in (JobStatus.FAILED, JobStatus.TIMEOUT)
         ]
         return failed[-limit:]
+    
+    async def _persist_job_result(self, result: JobResult):
+        """
+        BUG-006: Persist job result to database for audit logging
+        
+        Saves:
+        - Input snapshot (job_data)
+        - Output snapshot (result_data)
+        - Error traceback
+        - Retry count
+        - Token usage
+        """
+        try:
+            from src.core.database import SessionLocal
+            from src.models.job_runs import JobRun, JobStatus as DBJobStatus
+            
+            db = SessionLocal()
+            try:
+                job_run = JobRun(
+                    job_id=result.job_id,
+                    job_type=result.job_type,
+                    status=DBJobStatus(result.status.value),
+                    started_at=result.started_at,
+                    completed_at=result.completed_at,
+                    duration_seconds=result.duration_seconds,
+                    input_data=result.input_data,  # Input snapshot
+                    result_data=result.result_data,  # Output snapshot
+                    error_message=result.error_message,
+                    error_traceback=result.error_traceback,
+                    retry_count=result.retry_count,
+                    tokens_used=result.tokens_used,
+                    triggered_by=result.triggered_by
+                )
+                
+                db.add(job_run)
+                db.commit()
+                
+                logger.debug(f"[{result.job_id}] Job result persisted to database")
+                
+            except Exception as e:
+                db.rollback()
+                logger.warning(f"[{result.job_id}] Failed to persist job result: {e}")
+            finally:
+                db.close()
+                
+        except ImportError:
+            # Database not available, skip persistence
+            logger.debug(f"[{result.job_id}] Database not available, skipping persistence")
 
 
 # Global job runner instance

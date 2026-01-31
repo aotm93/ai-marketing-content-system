@@ -43,11 +43,19 @@ class GSCQuery(Base, TimestampMixin):
     site_url = Column(String(255), nullable=True)
     
     # Unique constraint on date + query + page
+    # Performance indexes for common query patterns
     __table_args__ = (
         UniqueConstraint('query_date', 'query', 'page', name='uq_gsc_date_query_page'),
+        # Single column indexes
         Index('ix_gsc_impressions', 'impressions'),
         Index('ix_gsc_position', 'position'),
+        Index('ix_gsc_ctr', 'ctr'),
+        # Composite indexes for performance (BUG-011)
         Index('ix_gsc_query_date_range', 'query_date', 'impressions'),
+        Index('ix_gsc_date_position', 'query_date', 'position'),
+        Index('ix_gsc_date_query', 'query_date', 'query'),
+        Index('ix_gsc_impressions_position', 'impressions', 'position'),
+        Index('ix_gsc_page_clicks', 'page', 'clicks'),
     )
     
     def __repr__(self):
