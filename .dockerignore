@@ -27,6 +27,7 @@ env
 # Node.js (dashboard builds in container)
 src/dashboard/node_modules
 src/dashboard/.next
+src/dashboard/out
 
 # IDE
 .idea
@@ -55,8 +56,7 @@ conftest.py
 # Agent/AI Files
 .agent
 
-# Docker
-Dockerfile*
+# Docker (keep Dockerfile accessible for build context)
 docker-compose*.yml
 .dockerignore
 

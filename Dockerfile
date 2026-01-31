@@ -26,7 +26,7 @@ RUN pip install --no-cache-dir --upgrade pip \
     && pip install --no-cache-dir -r requirements-prod.txt
 
 # ============================================
-# STAGE 2: Frontend Builder (Next.js Dashboard)
+# STAGE 2: Frontend Builder (Next.js Static Export)
 # ============================================
 FROM node:20-alpine AS frontend-builder
 
@@ -35,24 +35,25 @@ WORKDIR /build
 # Copy package files first for better caching
 COPY src/dashboard/package*.json ./
 
-# Install dependencies
-RUN npm ci --only=production=false
+# Install all dependencies (including devDependencies for build)
+RUN npm ci
 
-# Copy source and build
+# Copy source and build (output: 'export' generates 'out/' directory)
 COPY src/dashboard/ ./
 RUN npm run build
 
 # ============================================
-# STAGE 3: Production Runtime
+# STAGE 3: Production Runtime (Minimal)
 # ============================================
 FROM python:3.10-slim AS production
 
 WORKDIR /app
 
-# Install only runtime dependencies (no gcc, no npm)
+# Install only essential runtime dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq5 \
     curl \
+    netcat-openbsd \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
 
@@ -62,16 +63,21 @@ ENV PATH="/opt/venv/bin:$PATH"
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
-# Copy built dashboard from frontend builder
-COPY --from=frontend-builder /build/.next /app/src/dashboard/.next
-COPY --from=frontend-builder /build/public /app/src/dashboard/public
-COPY --from=frontend-builder /build/node_modules /app/src/dashboard/node_modules
-COPY --from=frontend-builder /build/package.json /app/src/dashboard/package.json
+# Copy ONLY the static export from frontend builder (out/ directory)
+# No node_modules needed - it's a static site!
+COPY --from=frontend-builder /build/out /app/src/dashboard/out
 
 # Copy application source code
 COPY src/ /app/src/
 COPY alembic/ /app/alembic/
 COPY alembic.ini /app/
+
+# Copy static admin directory
+COPY static/ /app/static/
+
+# Copy entrypoint script
+COPY scripts/entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
 
 # Create non-root user for security
 RUN useradd --create-home --shell /bin/bash appuser \
@@ -81,9 +87,9 @@ USER appuser
 # Expose port
 EXPOSE 8080
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+# Health check with appropriate timing
+HEALTHCHECK --interval=30s --timeout=10s --start-period=90s --retries=5 \
     CMD curl -f http://localhost:8080/health || exit 1
 
-# Run the application with optimized settings
-CMD ["uvicorn", "src.api.main:app", "--host", "0.0.0.0", "--port", "8080", "--workers", "2", "--loop", "uvloop", "--http", "httptools"]
+# Use entrypoint script that waits for dependencies
+ENTRYPOINT ["/app/entrypoint.sh"]
