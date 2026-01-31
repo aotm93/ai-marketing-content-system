@@ -6,7 +6,7 @@
 # ============================================
 # STAGE 1: Python Dependencies Builder
 # ============================================
-FROM python:3.10-slim AS python-builder
+FROM python:3.11-slim AS python-builder
 
 WORKDIR /build
 
@@ -45,7 +45,7 @@ RUN npm run build
 # ============================================
 # STAGE 3: Production Runtime (Minimal)
 # ============================================
-FROM python:3.10-slim AS production
+FROM python:3.11-slim AS production
 
 WORKDIR /app
 

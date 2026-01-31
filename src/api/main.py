@@ -88,13 +88,9 @@ async def lifespan(app: FastAPI):
             autopilot = configure_autopilot(config)
             logger.info(f"Autopilot configured: mode={mode.value}, enabled={settings.autopilot_enabled}")
             
-            # Register content generation job (actual implementation would go here)
-            async def content_generation_job(data):
-                """Placeholder for content generation job"""
-                logger.info("Content generation job triggered")
-                return {"status": "completed", "message": "Content generation placeholder"}
-            
-            autopilot.register_job("content_generation", content_generation_job)
+            # Register all jobs (content generation, SEO, refresh, etc.)
+            from src.scheduler.jobs import register_all_jobs
+            register_all_jobs(autopilot)
             
         except Exception as e:
             logger.error(f"Failed to initialize autopilot: {e}")
