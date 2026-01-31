@@ -26,6 +26,7 @@ batch_queue = BatchJobQueue()
 
 class GenerationRequest(BaseModel):
     """Request for page generation"""
+    model_config = {'protected_namespaces': ()}
     model_name: str
     template_id: str
     max_pages: Optional[int] = None
@@ -36,6 +37,7 @@ class GenerationRequest(BaseModel):
 
 class PreviewRequest(BaseModel):
     """Request for generation preview"""
+    model_config = {'protected_namespaces': ()}
     model_name: str
     count: int = 10
 

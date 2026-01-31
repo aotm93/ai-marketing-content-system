@@ -130,13 +130,7 @@ def status_server():
         print("⚪ Status: Stopped")
     print("===================\n")
 
-
 def main():
-    try:
-        sys.stdout.reconfigure(encoding='utf-8')
-    except AttributeError:
-        pass # Python < 3.7
-
     parser = argparse.ArgumentParser()
     parser.add_argument("action", choices=["start", "stop", "status"])
     parser.add_argument("port", nargs="?", default="3000")
