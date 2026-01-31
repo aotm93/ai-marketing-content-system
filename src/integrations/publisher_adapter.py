@@ -354,7 +354,7 @@ class WordPressAdapter(PublisherAdapter):
                 post_id=post_id,
                 error="SEO adapter not configured"
             )
-        
+
         try:
             await self.seo_adapter.set_seo_meta(int(post_id), seo)
             return PublishResult(
@@ -370,6 +370,19 @@ class WordPressAdapter(PublisherAdapter):
                 post_id=post_id,
                 error=str(e)
             )
+
+    async def get_simple_posts_for_linking(self, limit: int = 20) -> List[Dict[str, str]]:
+        """
+        Get simplified list of recent posts for internal linking context.
+        Delegates to the underlying WordPress client.
+
+        Args:
+            limit: Maximum number of posts to retrieve
+
+        Returns:
+            List of dicts with id, title, slug, and link
+        """
+        return await self.wp_client.get_simple_posts_for_linking(limit=limit)
 
 
 class WebhookAdapter(PublisherAdapter):
