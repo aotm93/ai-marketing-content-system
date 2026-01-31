@@ -109,27 +109,38 @@ async def get_config(admin: dict = Depends(get_current_admin)):
 
     Returns non-sensitive configuration values
     """
+    # Helper function to mask sensitive values
+    def mask_secret(value: str | None) -> str:
+        """Return masked indicator if value exists, empty string otherwise"""
+        if value and len(value) > 0:
+            return "••••••••"  # Indicates value is set but hidden
+        return ""
+    
     safe_config = {
         # Primary AI Provider
         "primary_ai_provider": settings.primary_ai_provider,
         "primary_ai_base_url": settings.primary_ai_base_url,
+        "primary_ai_api_key": mask_secret(settings.primary_ai_api_key),  # FIX: Show masked value
         "primary_ai_text_model": settings.primary_ai_text_model,
         "primary_ai_image_model": settings.primary_ai_image_model,
         
         # Fallback AI Provider
         "fallback_ai_provider": settings.fallback_ai_provider or "",
         "fallback_ai_base_url": settings.fallback_ai_base_url or "",
+        "fallback_ai_api_key": mask_secret(settings.fallback_ai_api_key),  # FIX: Show masked value
         "fallback_ai_text_model": settings.fallback_ai_text_model or "",
         
         # WordPress
         "wordpress_url": settings.wordpress_url,
         "wordpress_username": settings.wordpress_username,
+        "wordpress_password": mask_secret(settings.wordpress_password),  # FIX: Show masked value
         "seo_plugin": settings.seo_plugin,
+        "seo_api_key": mask_secret(settings.seo_api_key),  # FIX: Show masked value
         
         # Keyword Research
         "keyword_api_provider": settings.keyword_api_provider or "",
         "keyword_api_username": settings.keyword_api_username or "",
-        "keyword_api_key": settings.keyword_api_key or "", # Explicitly included for UI population check
+        "keyword_api_key": mask_secret(settings.keyword_api_key),  # FIX: Show masked value
         
         # System
         "environment": settings.environment,
@@ -147,7 +158,7 @@ async def get_config(admin: dict = Depends(get_current_admin)):
         # P1: GSC
         "gsc_site_url": settings.gsc_site_url or "",
         "gsc_auth_method": settings.gsc_auth_method,
-        "gsc_credentials_json": settings.gsc_credentials_json or "",
+        "gsc_credentials_json": mask_secret(settings.gsc_credentials_json),  # FIX: Show masked value (sensitive)
     }
 
     return ConfigResponse(

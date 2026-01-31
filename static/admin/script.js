@@ -111,6 +111,7 @@ async function loadConfiguration() {
 
 // Populate configuration fields
 function populateConfigFields(config) {
+    // Regular fields mapping
     const mapping = {
         'primary_ai_provider': 'PRIMARY_AI_PROVIDER',
         'primary_ai_base_url': 'PRIMARY_AI_BASE_URL',
@@ -127,21 +128,55 @@ function populateConfigFields(config) {
         'log_level': 'LOG_LEVEL',
         'max_concurrent_agents': 'MAX_CONCURRENT_AGENTS',
         'content_generation_timeout': 'CONTENT_GENERATION_TIMEOUT',
-        // New Fields
+        // Autopilot Fields
         'autopilot_enabled': 'AUTOPILOT_ENABLED',
         'autopilot_mode': 'AUTOPILOT_MODE',
         'publish_interval_minutes': 'PUBLISH_INTERVAL_MINUTES',
         'max_posts_per_day': 'MAX_POSTS_PER_DAY',
         'max_concurrent_jobs': 'MAX_CONCURRENT_JOBS',
         'gsc_site_url': 'GSC_SITE_URL',
-        'gsc_auth_method': 'GSC_AUTH_METHOD',
+        'gsc_auth_method': 'GSC_AUTH_METHOD'
+    };
+
+    // Sensitive fields (API Keys, Passwords) - these return masked values from backend
+    const sensitiveMapping = {
+        'primary_ai_api_key': 'PRIMARY_AI_API_KEY',
+        'fallback_ai_api_key': 'FALLBACK_AI_API_KEY',
+        'wordpress_password': 'WORDPRESS_PASSWORD',
+        'seo_api_key': 'SEO_API_KEY',
+        'keyword_api_key': 'KEYWORD_API_KEY',
         'gsc_credentials_json': 'GSC_CREDENTIALS_JSON'
     };
 
+    // Populate regular fields
     for (const [key, elementId] of Object.entries(mapping)) {
         const element = document.getElementById(elementId);
         if (element && config[key] !== null && config[key] !== undefined) {
             element.value = config[key];
+        }
+    }
+
+    // Populate sensitive fields with special handling
+    // If the backend returns a masked value (••••••••), we set a placeholder instead of the value
+    // This tells the user the value is saved, but doesn't expose it
+    for (const [key, elementId] of Object.entries(sensitiveMapping)) {
+        const element = document.getElementById(elementId);
+        if (element && config[key] !== null && config[key] !== undefined) {
+            const value = config[key];
+            if (value === '••••••••') {
+                // Value is saved but masked - show placeholder
+                element.value = '';
+                element.placeholder = '✓ 已配置 (留空保留现有值)';
+                element.dataset.hasExistingValue = 'true';
+            } else if (value === '') {
+                // No value set
+                element.value = '';
+                element.placeholder = '未配置';
+                element.dataset.hasExistingValue = 'false';
+            } else {
+                // For textarea (GSC_CREDENTIALS_JSON), handle differently
+                element.value = value;
+            }
         }
     }
 }
@@ -157,23 +192,39 @@ async function handleSaveAll() {
         'SEO_PLUGIN', 'SEO_API_KEY',
         'KEYWORD_API_PROVIDER', 'KEYWORD_API_KEY', 'KEYWORD_API_USERNAME', 'KEYWORD_API_BASE_URL',
         'LOG_LEVEL', 'MAX_CONCURRENT_AGENTS', 'CONTENT_GENERATION_TIMEOUT',
-        // New Keys
+        // Autopilot Keys
         'AUTOPILOT_ENABLED', 'AUTOPILOT_MODE', 'PUBLISH_INTERVAL_MINUTES',
         'MAX_POSTS_PER_DAY', 'MAX_CONCURRENT_JOBS',
         'GSC_SITE_URL', 'GSC_AUTH_METHOD', 'GSC_CREDENTIALS_JSON'
     ];
 
+    // Sensitive fields that should not be overwritten with empty values if they already exist
+    const sensitiveKeys = [
+        'PRIMARY_AI_API_KEY', 'FALLBACK_AI_API_KEY',
+        'WORDPRESS_PASSWORD', 'SEO_API_KEY',
+        'KEYWORD_API_KEY', 'GSC_CREDENTIALS_JSON'
+    ];
+
     let successCount = 0;
     let failCount = 0;
+    let skippedCount = 0;
 
     saveAllBtn.disabled = true;
-    saveAllBtn.textContent = 'Saving...';
+    saveAllBtn.textContent = '保存中...';
 
     for (const key of configKeys) {
         const element = document.getElementById(key);
-        // Save if element exists, regardless of whether value is empty or not
         if (element) {
             let valueToSend = element.value;
+
+            // Skip saving sensitive fields if:
+            // 1. The field is empty AND
+            // 2. There was an existing value (marked by dataset.hasExistingValue)
+            if (sensitiveKeys.includes(key) && valueToSend === '' && element.dataset.hasExistingValue === 'true') {
+                skippedCount++;
+                console.log(`Skipped ${key} - keeping existing value`);
+                continue;
+            }
 
             // Special handling for JSON fields: Minify to single line
             if (key === 'GSC_CREDENTIALS_JSON' && valueToSend.trim().startsWith('{')) {
@@ -216,9 +267,15 @@ async function handleSaveAll() {
     saveAllBtn.textContent = '💾 Save All Changes';
 
     if (failCount === 0) {
-        showMessage(`Successfully saved ${successCount} configuration items`, 'success');
+        let message = `✅ 成功保存 ${successCount} 项配置`;
+        if (skippedCount > 0) {
+            message += ` (${skippedCount} 个敏感字段保留现有值)`;
+        }
+        showMessage(message, 'success');
+        // Reload configuration to show updated masked values
+        await loadConfiguration();
     } else {
-        showMessage(`Saved ${successCount} items, ${failCount} failed`, 'error');
+        showMessage(`保存 ${successCount} 项，${failCount} 项失败`, 'error');
     }
 }
 
