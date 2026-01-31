@@ -1,0 +1,70 @@
+# ===========================================
+# Docker Build Ignore - Reduce build context
+# ===========================================
+
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info
+.eggs
+*.egg
+.pytest_cache
+.coverage
+htmlcov
+.mypy_cache
+.ruff_cache
+venv
+.venv
+env
+
+# Node.js (dashboard builds in container)
+src/dashboard/node_modules
+src/dashboard/.next
+
+# IDE
+.idea
+.vscode
+*.swp
+*.swo
+*~
+
+# Documentation
+docs
+*.md
+!README.md
+
+# Tests (not needed in production)
+tests
+*_test.py
+test_*.py
+conftest.py
+
+# Development files
+.env.local
+.env.development
+.env.test
+*.log
+
+# Agent/AI Files
+.agent
+
+# Docker
+Dockerfile*
+docker-compose*.yml
+.dockerignore
+
+# Generated content (mounted as volume)
+generated_content
+
+# Misc
+*.bak
+*.tmp
+.DS_Store
+Thumbs.db
