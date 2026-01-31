@@ -23,9 +23,37 @@ from src.core.database import SessionLocal
 # Routers moved to after app init
 
 import logging
+from logging.handlers import RotatingFileHandler
 import os
 
-logging.basicConfig(level=settings.log_level)
+# Create logs directory if it doesn't exist
+os.makedirs("logs", exist_ok=True)
+
+# Configure log format
+log_format = logging.Formatter(
+    '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
+
+# Console handler
+console_handler = logging.StreamHandler()
+console_handler.setFormatter(log_format)
+
+# File handler with rotation (10MB per file, keep 5 backups)
+file_handler = RotatingFileHandler(
+    'logs/app.log',
+    maxBytes=10*1024*1024,  # 10MB
+    backupCount=5,
+    encoding='utf-8'
+)
+file_handler.setFormatter(log_format)
+
+# Configure root logger
+logging.basicConfig(
+    level=settings.log_level,
+    handlers=[console_handler, file_handler]
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -91,7 +119,11 @@ async def lifespan(app: FastAPI):
             # Register all jobs (content generation, SEO, refresh, etc.)
             from src.scheduler.jobs import register_all_jobs
             register_all_jobs(autopilot)
-            
+
+            # Start the scheduler automatically
+            autopilot.start()
+            logger.info("Autopilot scheduler started automatically")
+
         except Exception as e:
             logger.error(f"Failed to initialize autopilot: {e}")
     

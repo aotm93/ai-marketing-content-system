@@ -77,9 +77,15 @@ def update_config_value(db: Session, key: str, value: str, data_type: str = "str
                 runtime_val = str(value).lower() == "true"
             elif data_type == "int":
                 runtime_val = int(value)
-            
+
             setattr(settings, setting_key, runtime_val)
-            
+
+            # Special handling: Update log level dynamically
+            if setting_key == "log_level":
+                import logging
+                logging.getLogger().setLevel(runtime_val)
+                logger.info(f"Log level updated to {runtime_val} (effective immediately)")
+
         return True
     except Exception as e:
         db.rollback()
