@@ -425,6 +425,26 @@ class JobRunner:
             
             db = SessionLocal()
             try:
+                # Sanitize data to ensure JSON serialization
+                import json
+
+                def sanitize_for_json(data):
+                    """Convert data to JSON-serializable format"""
+                    if data is None:
+                        return None
+                    try:
+                        # Try to serialize directly
+                        json.dumps(data)
+                        return data
+                    except (TypeError, ValueError):
+                        # If it fails, convert to string representation
+                        if isinstance(data, dict):
+                            return {k: sanitize_for_json(v) for k, v in data.items()}
+                        elif isinstance(data, (list, tuple)):
+                            return [sanitize_for_json(item) for item in data]
+                        else:
+                            return str(data)
+
                 job_run = JobRun(
                     job_id=result.job_id,
                     job_type=result.job_type,
@@ -432,8 +452,8 @@ class JobRunner:
                     started_at=result.started_at,
                     completed_at=result.completed_at,
                     duration_seconds=result.duration_seconds,
-                    input_data=result.input_data,  # Input snapshot
-                    result_data=result.result_data,  # Output snapshot
+                    input_data=sanitize_for_json(result.input_data),
+                    result_data=sanitize_for_json(result.result_data),
                     error_message=result.error_message,
                     error_traceback=result.error_traceback,
                     retry_count=result.retry_count,

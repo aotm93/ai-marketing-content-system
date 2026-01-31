@@ -138,7 +138,7 @@ class AIProviderFactory:
         image_model: str
     ) -> AIProviderInterface:
         """Create an AI provider instance"""
-        if provider_name in ["openai", "custom", "azure"]:
+        if provider_name in ["openai", "custom", "azure", "yunwu"]:
             return OpenAICompatibleProvider(
                 base_url=base_url,
                 api_key=api_key,

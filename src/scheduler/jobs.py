@@ -114,8 +114,8 @@ async def content_generation_job(data: Dict[str, Any]) -> Dict[str, Any]:
         )
         
         try:
-            # Use the method we just added
-            recent_posts = await wp_adapter.client.get_simple_posts_for_linking(limit=10)
+            # Fetch recent posts for internal linking context
+            recent_posts = await wp_adapter.get_simple_posts_for_linking(limit=10)
             existing_posts_context = [f"- {p['title']} (URL: {p['link']})" for p in recent_posts]
         except Exception as e:
             logger.warning(f"Failed to fetch internal linking context: {e}")
