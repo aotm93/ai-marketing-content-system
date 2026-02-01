@@ -89,7 +89,7 @@ EXPOSE 8080
 
 # Health check with appropriate timing
 HEALTHCHECK --interval=30s --timeout=10s --start-period=90s --retries=5 \
-    CMD curl -f http://localhost:8080/health || exit 1
+    CMD curl -f "http://localhost:${PORT:-8080}/health" || exit 1
 
 # Use entrypoint script that waits for dependencies
 ENTRYPOINT ["/app/entrypoint.sh"]
