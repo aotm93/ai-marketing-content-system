@@ -131,7 +131,7 @@ async def content_generation_job(data: Dict[str, Any]) -> Dict[str, Any]:
         # Get already used keywords from database
         from src.models.keyword import Keyword, KeywordStatus
         from src.database import get_db
-        from datetime import datetime, timedelta
+        from datetime import timedelta
 
         db = next(get_db())
 
