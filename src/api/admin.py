@@ -379,3 +379,140 @@ async def seo_integration_check(
             errors=[str(e)]
         )
 
+
+class WebsiteAnalysisConfigRequest(BaseModel):
+    """Website analysis configuration request"""
+    cache_days: int
+
+
+class WebsiteAnalysisConfigResponse(BaseModel):
+    """Website analysis configuration response"""
+    success: bool
+    message: str
+    cache_days: Optional[int] = None
+    cache_age_days: Optional[float] = None
+    next_analysis_days: Optional[float] = None
+
+
+@router.get("/website-analysis/config", response_model=WebsiteAnalysisConfigResponse)
+async def get_website_analysis_config(
+    admin: dict = Depends(get_current_admin),
+    db: Session = Depends(get_db)
+):
+    """
+    Get website analysis cache configuration
+    """
+    try:
+        from src.models.config import SystemConfig
+        from src.scheduler.jobs import _website_profile_cache
+        from datetime import datetime
+
+        # Get config from database
+        config = db.query(SystemConfig).filter(
+            SystemConfig.key == "website_analysis_cache_days"
+        ).first()
+
+        cache_days = int(config.value) if config and config.value else 7
+
+        # Get cache status
+        cache_age_days = None
+        next_analysis_days = None
+
+        if _website_profile_cache["timestamp"]:
+            cache_age = (datetime.now() - _website_profile_cache["timestamp"]).total_seconds()
+            cache_age_days = cache_age / 86400
+            next_analysis_days = cache_days - cache_age_days
+
+        return WebsiteAnalysisConfigResponse(
+            success=True,
+            message="Website analysis configuration retrieved",
+            cache_days=cache_days,
+            cache_age_days=cache_age_days,
+            next_analysis_days=max(0, next_analysis_days) if next_analysis_days else None
+        )
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get configuration: {str(e)}"
+        )
+
+
+@router.post("/website-analysis/config", response_model=WebsiteAnalysisConfigResponse)
+async def update_website_analysis_config(
+    request: WebsiteAnalysisConfigRequest,
+    admin: dict = Depends(get_current_admin),
+    db: Session = Depends(get_db)
+):
+    """
+    Update website analysis cache duration (in days)
+    """
+    try:
+        from src.models.config import SystemConfig
+
+        # Validate input
+        if request.cache_days < 1 or request.cache_days > 30:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cache duration must be between 1 and 30 days"
+            )
+
+        # Update or create config
+        config = db.query(SystemConfig).filter(
+            SystemConfig.key == "website_analysis_cache_days"
+        ).first()
+
+        if config:
+            config.value = str(request.cache_days)
+        else:
+            config = SystemConfig(
+                key="website_analysis_cache_days",
+                value=str(request.cache_days),
+                data_type="int",
+                description="Website analysis cache duration in days"
+            )
+            db.add(config)
+
+        db.commit()
+
+        return WebsiteAnalysisConfigResponse(
+            success=True,
+            message=f"Cache duration updated to {request.cache_days} days",
+            cache_days=request.cache_days
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to update configuration: {str(e)}"
+        )
+
+
+@router.post("/website-analysis/refresh", response_model=WebsiteAnalysisConfigResponse)
+async def refresh_website_analysis(
+    admin: dict = Depends(get_current_admin)
+):
+    """
+    Manually trigger website analysis refresh (clears cache)
+    """
+    try:
+        from src.scheduler.jobs import _website_profile_cache
+
+        # Clear cache to force re-analysis on next run
+        _website_profile_cache["profile"] = None
+        _website_profile_cache["timestamp"] = None
+
+        return WebsiteAnalysisConfigResponse(
+            success=True,
+            message="Website analysis cache cleared. Next content generation will trigger re-analysis."
+        )
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to refresh analysis: {str(e)}"
+        )
+

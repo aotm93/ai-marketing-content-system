@@ -28,6 +28,10 @@ class BaseAgent(ABC):
 
     async def publish_event(self, event_name: str, data: Dict[str, Any]) -> None:
         """Publish an event to the event bus"""
+        if self.event_bus is None:
+            logger.debug(f"{self.name} skipping event publish (no event_bus): {event_name}")
+            return
+
         event = Event(name=event_name, data=data, source=self.name)
         await self.event_bus.publish(event)
         logger.info(f"{self.name} published event: {event_name}")

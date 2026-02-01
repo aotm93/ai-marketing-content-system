@@ -16,6 +16,83 @@ from src.integrations.publisher_adapter import PublishableContent, PublishStatus
 
 logger = logging.getLogger(__name__)
 
+# Global cache for website analysis
+_website_profile_cache = {
+    "profile": None,
+    "timestamp": None,
+    "default_cache_duration": 604800  # 7 days in seconds (default)
+}
+
+
+def get_website_analysis_cache_duration() -> int:
+    """
+    Get website analysis cache duration from database config
+    Returns duration in seconds (default: 7 days)
+    """
+    try:
+        from src.models.config import SystemConfig
+        from src.database import get_db
+
+        db = next(get_db())
+        config = db.query(SystemConfig).filter(
+            SystemConfig.key == "website_analysis_cache_days"
+        ).first()
+
+        if config and config.value:
+            days = int(config.value)
+            return days * 86400  # Convert days to seconds
+
+    except Exception as e:
+        logger.debug(f"Failed to read cache config from DB: {e}")
+
+    # Return default: 7 days
+    return _website_profile_cache["default_cache_duration"]
+
+
+async def get_cached_website_profile():
+    """
+    Get cached website profile or analyze if cache expired
+    Returns None if analysis fails
+    """
+    global _website_profile_cache
+
+    # Get cache duration from database config
+    cache_duration = get_website_analysis_cache_duration()
+
+    # Check if cache is valid
+    if _website_profile_cache["profile"] is not None and _website_profile_cache["timestamp"] is not None:
+        cache_age = (datetime.now() - _website_profile_cache["timestamp"]).total_seconds()
+        if cache_age < cache_duration:
+            cache_days = cache_age / 86400
+            logger.info(f"Using cached website profile (age: {cache_days:.1f} days, expires in {(cache_duration - cache_age) / 86400:.1f} days)")
+            return _website_profile_cache["profile"]
+
+    # Cache expired or not available, analyze website
+    try:
+        from src.services.website_analyzer import WebsiteAnalyzer
+        from src.integrations.wordpress_client import WordPressClient
+
+        wp_client = WordPressClient(
+            base_url=settings.wordpress_url,
+            username=settings.wordpress_username,
+            password=settings.wordpress_password
+        )
+
+        analyzer = WebsiteAnalyzer(wp_client)
+        profile = await analyzer.analyze_website(max_posts=30)
+
+        # Update cache
+        _website_profile_cache["profile"] = profile
+        _website_profile_cache["timestamp"] = datetime.now()
+
+        logger.info(f"Website analysis complete: {len(profile.product_categories)} categories, "
+                   f"Business: {profile.business_type}")
+        return profile
+
+    except Exception as e:
+        logger.warning(f"Website analysis failed: {e}")
+        return None
+
 
 async def content_generation_job(data: Dict[str, Any]) -> Dict[str, Any]:
     """
@@ -46,10 +123,37 @@ async def content_generation_job(data: Dict[str, Any]) -> Dict[str, Any]:
     }
     
     try:
-        # --- Layer 1: Opportunity Discovery ---
+        # --- Layer 1: Opportunity Discovery (with deduplication) ---
         target_keyword = None
         target_context = {}
-        
+        keyword_record = None
+
+        # Get already used keywords from database
+        from src.models.keyword import Keyword, KeywordStatus
+        from src.database import get_db
+        from datetime import datetime, timedelta
+
+        db = next(get_db())
+
+        # Initialize website_profile at function scope
+        website_profile = None
+
+        # All used keywords (for deduplication)
+        used_keywords = db.query(Keyword.keyword).filter(
+            Keyword.status.in_([KeywordStatus.IN_PROGRESS, KeywordStatus.PUBLISHED])
+        ).all()
+        used_keyword_set = {kw[0].lower() for kw in used_keywords}
+
+        # Keywords used today (for semantic diversity check)
+        today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        today_keywords = db.query(Keyword.keyword).filter(
+            Keyword.status.in_([KeywordStatus.IN_PROGRESS, KeywordStatus.PUBLISHED]),
+            Keyword.created_at >= today_start
+        ).all()
+        today_keyword_list = [kw[0] for kw in today_keywords]
+
+        logger.info(f"Found {len(used_keyword_set)} total used keywords, {len(today_keyword_list)} used today")
+
         # 1.1 Try GSC (Optimization)
         try:
             from src.integrations.gsc_client import GSCClient
@@ -58,39 +162,153 @@ async def content_generation_job(data: Dict[str, Any]) -> Dict[str, Any]:
                     site_url=settings.gsc_site_url,
                     credentials_json=settings.gsc_credentials_json
                 )
-                opportunities = gsc.get_low_hanging_fruits(limit=5)
-                if opportunities:
-                    best_opp = opportunities[0] 
-                    target_keyword = best_opp.query
-                    target_context = {
-                        "source": "GSC (Optimization)", 
-                        "metric": f"Pos: {best_opp.position}, Impr: {best_opp.impressions}"
-                    }
+                opportunities = gsc.get_low_hanging_fruits(limit=20)  # Fetch more to filter
+
+                # Filter out used keywords and select first unused
+                for opp in opportunities:
+                    if opp.query.lower() not in used_keyword_set:
+                        target_keyword = opp.query
+                        target_context = {
+                            "source": "GSC (Optimization)",
+                            "metric": f"Pos: {opp.position}, Impr: {opp.impressions}"
+                        }
+                        logger.info(f"Selected unused GSC keyword: {target_keyword}")
+                        break
         except Exception as e:
             logger.warning(f"GSC fetch failed: {e}")
-            
-        # 1.2 Try Keyword API (Expansion)
+
+        # 1.2 Try Content-Aware Keywords (Learns from website - high priority)
+        if not target_keyword:
+            try:
+                from src.services.keyword_strategy import get_keyword_strategy
+
+                # Get cached website profile (or analyze if needed)
+                website_profile = await get_cached_website_profile()
+
+                if website_profile:
+                    logger.info(f"Using website profile: {len(website_profile.product_categories)} categories, "
+                               f"Business: {website_profile.business_type}, "
+                               f"Audience: {website_profile.target_audience}")
+
+                    # Generate keywords based on website content
+                    keyword_strategy = get_keyword_strategy(website_profile)
+                else:
+                    # Fallback to default keywords if analysis failed
+                    logger.warning("Website analysis unavailable, using default keyword strategy")
+                    keyword_strategy = get_keyword_strategy(None)
+
+                keyword_pool = keyword_strategy.generate_keyword_pool(limit=100)
+
+                # Filter out used keywords
+                available_candidates = [
+                    kw for kw in keyword_pool
+                    if kw.keyword.lower() not in used_keyword_set
+                ]
+
+                # Apply semantic diversity filter (avoid similar keywords on same day)
+                if today_keyword_list:
+                    available_candidates = keyword_strategy.filter_by_semantic_diversity(
+                        candidates=available_candidates,
+                        selected_keywords=today_keyword_list,
+                        min_diversity_score=0.4  # 40% different words required
+                    )
+
+                if available_candidates:
+                    # Prioritize long-tail keywords (easier to rank)
+                    long_tail = [kw for kw in available_candidates if kw.is_long_tail]
+                    selected = long_tail[0] if long_tail else available_candidates[0]
+
+                    target_keyword = selected.keyword
+                    target_context = {
+                        "source": "Content-Aware (Website Analysis)",
+                        "metric": f"Stage: {selected.journey_stage.value}, Intent: {selected.intent.value}"
+                    }
+                    logger.info(f"Selected content-aware keyword: {target_keyword} (Stage: {selected.journey_stage.value})")
+            except Exception as e:
+                logger.warning(f"Content-aware keyword generation failed: {e}")
+
+        # 1.3 Try Keyword API (Expansion)
         kw_client = None
         if not target_keyword and settings.keyword_api_key:
             try:
                 from src.integrations.keyword_client import KeywordClient
                 kw_client = KeywordClient()
-                seed = "water bottle" # TODO: Configurable seed
+
+                # Use first product category as seed (dynamic)
+                seed = "packaging bottles"
+                if website_profile and website_profile.product_categories:
+                    seed = website_profile.product_categories[0]
+                    logger.info(f"Using dynamic seed from website: {seed}")
+
                 suggestions = await kw_client.get_easy_wins(seed)
-                if suggestions:
-                    best_kw = suggestions[0]
-                    target_keyword = best_kw.keyword
-                    target_context = {
-                        "source": "KeywordAPI (Expansion)",
-                        "metric": f"Vol: {best_kw.volume}, KD: {best_kw.difficulty}"
-                    }
+
+                # Filter out used keywords
+                for kw in suggestions:
+                    if kw.keyword.lower() not in used_keyword_set:
+                        target_keyword = kw.keyword
+                        target_context = {
+                            "source": "KeywordAPI (Expansion)",
+                            "metric": f"Vol: {kw.volume}, KD: {kw.difficulty}"
+                        }
+                        logger.info(f"Selected unused Keyword API keyword: {target_keyword}")
+                        break
             except Exception as e:
                 logger.warning(f"Keyword API fetch failed: {e}")
 
-        # 1.3 Fallback
+        # 1.4 Fallback (generic packaging keywords)
         if not target_keyword:
-            target_keyword = "glass vs plastic water bottles"
-            target_context = {"source": "Fallback"}
+            fallback_keywords = [
+                # Product types
+                "cosmetic packaging bottles wholesale",
+                "bulk packaging containers supplier",
+                "custom bottles with logo",
+                # Material & features
+                "glass bottles for cosmetics",
+                "plastic jars wholesale",
+                "pump bottles supplier",
+                # Business queries
+                "packaging supplier for small business",
+                "wholesale packaging manufacturer",
+                "custom packaging solutions",
+                # How-to guides
+                "how to choose packaging supplier",
+                "packaging materials comparison",
+                "sustainable packaging options",
+                # Industry specific
+                "cosmetic packaging trends 2026",
+                "food grade packaging bottles",
+                "pharmaceutical packaging containers",
+                # B2B focused
+                "bulk order packaging bottles",
+                "private label packaging supplier",
+                "OEM packaging manufacturer",
+            ]
+            # Select first unused fallback
+            for fb_kw in fallback_keywords:
+                if fb_kw.lower() not in used_keyword_set:
+                    target_keyword = fb_kw
+                    target_context = {"source": "Fallback"}
+                    logger.info(f"Selected unused fallback keyword: {target_keyword}")
+                    break
+
+            # If all fallbacks used, use first one anyway
+            if not target_keyword:
+                target_keyword = fallback_keywords[0]
+                target_context = {"source": "Fallback (all used)"}
+                logger.warning("All fallback keywords used, reusing first one")
+
+        # Save keyword to database with IN_PROGRESS status
+        keyword_record = db.query(Keyword).filter(Keyword.keyword == target_keyword).first()
+        if not keyword_record:
+            keyword_record = Keyword(
+                keyword=target_keyword,
+                status=KeywordStatus.IN_PROGRESS
+            )
+            db.add(keyword_record)
+        else:
+            keyword_record.status = KeywordStatus.IN_PROGRESS
+        db.commit()
+        logger.info(f"Marked keyword as IN_PROGRESS: {target_keyword}")
 
         result["steps"].append({ "step": "strategy_target", "data": {"keyword": target_keyword, "context": target_context} })
 
@@ -244,14 +462,40 @@ async def content_generation_job(data: Dict[str, Any]) -> Dict[str, Any]:
         )
         
         publish_result = await wp_adapter.publish(content)
-        
+
         if publish_result.status == PublishStatus.SUCCESS:
             result["status"] = "success"
             result["post_id"] = publish_result.post_id
             result["post_url"] = publish_result.post_url
+
+            # Update keyword status to PUBLISHED
+            if keyword_record:
+                keyword_record.status = KeywordStatus.PUBLISHED
+                db.commit()
+                logger.info(f"Marked keyword as PUBLISHED: {target_keyword}")
+
+            # Create Content record
+            from src.models.content import Content, ContentStatus
+            content_record = Content(
+                keyword_id=keyword_record.id if keyword_record else None,
+                title=meta_data.get("title"),
+                body=content_html,
+                meta_description=meta_data.get("meta_description"),
+                status=ContentStatus.PUBLISHED,
+                wordpress_post_id=publish_result.post_id
+            )
+            db.add(content_record)
+            db.commit()
+            logger.info(f"Created Content record for post {publish_result.post_id}")
         else:
             result["status"] = "failed"
             result["error"] = publish_result.error
+
+            # Mark keyword as DISCOVERED (failed, can retry)
+            if keyword_record:
+                keyword_record.status = KeywordStatus.DISCOVERED
+                db.commit()
+                logger.warning(f"Marked keyword as DISCOVERED (publish failed): {target_keyword}")
             
     except Exception as e:
         logger.error(f"Advanced generation failed: {e}")
@@ -259,7 +503,20 @@ async def content_generation_job(data: Dict[str, Any]) -> Dict[str, Any]:
         logger.error(traceback.format_exc())
         result["status"] = "failed"
         result["error"] = str(e)
-    
+
+        # Rollback keyword status on failure
+        try:
+            if 'keyword_record' in locals() and keyword_record:
+                keyword_record.status = KeywordStatus.DISCOVERED
+                db.commit()
+                logger.info(f"Rolled back keyword status to DISCOVERED: {target_keyword}")
+        except Exception as rollback_error:
+            logger.error(f"Failed to rollback keyword status: {rollback_error}")
+    finally:
+        # Close database session
+        if 'db' in locals():
+            db.close()
+
     result["completed_at"] = datetime.now().isoformat()
     return result
 
