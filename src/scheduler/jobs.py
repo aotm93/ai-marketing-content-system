@@ -177,12 +177,23 @@ async def content_generation_job(data: Dict[str, Any]) -> Dict[str, Any]:
         # High timeout for deep content
         content_html = await ai.generate_text(article_prompt, temperature=0.7, max_tokens=3500)
         
-        # 4.3 Meta Prompt
+        # 4.3 Meta Prompt (SMART DYNAMIC YEAR)
+        current_year = datetime.now().year
         meta_prompt = f"""
         Generate JSON SEO Metadata for this article about "{target_keyword}".
+        Current Year: {current_year}
+        
         Format: {{"title": "...", "meta_description": "...", "excerpt": "..."}}
-        - Title: Power words, numbers, current year.
-        - Desc: <160 chars, compelling hook.
+        
+        Guidelines:
+        - Title: Use ONE of these formats randomly:
+          1. "How to [X]..." (NO year)
+          2. "[N] Best [X] ({current_year} Review)" (Use year)
+          3. "The Complete [X] Guide" (NO year)
+          4. "[X] Explained: What You Need to Know" (NO year)
+          5. "Top [N] [X] Trends for {current_year}" (Use year)
+        
+        - Desc: <160 chars, compelling hook. You make use "Updated for {current_year}" if relevant, but do not overuse.
         """
         meta_json_str = await ai.generate_text(meta_prompt, temperature=0.5)
         
@@ -195,6 +206,28 @@ async def content_generation_job(data: Dict[str, Any]) -> Dict[str, Any]:
 
         result["steps"].append({ "step": "creation", "data": {"words": len(content_html.split()), "model": settings.primary_ai_text_model} })
 
+        # --- Layer 4.4: Generate Featured Image ---
+        featured_image_bytes = None
+        try:
+            from src.agents.media_creator import MediaCreatorAgent
+            media_agent = MediaCreatorAgent(ai_provider=ai)
+            
+            image_task = {
+                "type": "create_featured_image",
+                "title": meta_data.get("title", target_keyword),
+                "keyword": target_keyword
+            }
+            
+            image_result = await media_agent.execute(image_task)
+            if image_result.get("status") == "success":
+                featured_image_bytes = image_result.get("image")
+                logger.info(f"Featured image generated: {len(featured_image_bytes)} bytes")
+            
+            result["steps"].append({ "step": "image_generation", "data": {"status": "success", "size": len(featured_image_bytes)} })
+        except Exception as img_error:
+            logger.warning(f"Image generation failed, continuing without image: {img_error}")
+            result["steps"].append({ "step": "image_generation", "data": {"status": "skipped", "error": str(img_error)} })
+
         # --- Layer 5: Publishing ---
         content = PublishableContent(
             title=meta_data.get("title"),
@@ -205,6 +238,8 @@ async def content_generation_job(data: Dict[str, Any]) -> Dict[str, Any]:
             seo_description=meta_data.get("meta_description"),
             focus_keyword=target_keyword,
             categories=["Blog", "Guides"],
+            featured_image_data=featured_image_bytes,
+            featured_image_alt=meta_data.get("title"),
             source_type="autopilot_advanced_seo"
         )
         
@@ -299,16 +334,19 @@ async def seo_optimization_job(data: Dict[str, Any]) -> Dict[str, Any]:
         
         **Task**: Generate JSON with optimized SEO meta:
         {{
-            "seo_title": "High-CTR title with power words, numbers, current year (50-60 chars)",
-            "meta_description": "Compelling description with primary keyword (150-160 chars)",
+            "seo_title": "High-CTR title (50-60 chars). See guidelines below.",
+            "meta_description": "Compelling description (150-160 chars).",
             "focus_keyword": "Primary target keyword phrase (2-4 words)",
             "secondary_keywords": ["keyword1", "keyword2", "keyword3"]
         }}
         
         **Guidelines**:
-        - Title: Include numbers, year (2026), emotional triggers
-        - Description: Include call-to-action, benefit-focused
-        - Focus on user intent and search behavior
+        - Current Year: {datetime.now().year}
+        - Title Strategy: 
+          - For "Best/Top/Review" intent: MUST include "({datetime.now().year})" or "in {datetime.now().year}" to signal freshness.
+          - For "Guide/How-to" intent: Do NOT use year unless it's a "State of the Industry" report.
+          - Use diverse formats: "How-to", "vs", "Listicle", "Guide".
+        - Description: Focus on benefits. Can use "Updated for {datetime.now().year}" for freshness.
         
         Return ONLY valid JSON.
         """
@@ -480,7 +518,8 @@ async def content_refresh_job(data: Dict[str, Any]) -> Dict[str, Any]:
                 1. {"Add a comprehensive FAQ section (5 questions) with Schema markup" if not has_faq else "FAQ exists, skip"}
                 2. {"Add a comparison/data table" if not has_table else "Table exists, skip"}
                 3. Add 200-400 words of fresh, valuable content
-                4. Include current year (2026) references
+                3. Add 200-400 words of fresh, valuable content
+                4. Update outdated information. You MAY mention "{datetime.now().year}" only if relevant to current trends/prices.
                 5. Strengthen E-E-A-T signals
                 
                 **Output Format**:

@@ -12,6 +12,7 @@ Generates optimized title and meta description variations to improve CTR:
 import logging
 from typing import Dict, Any, List
 from dataclasses import dataclass
+from datetime import datetime
 import re
 
 from .base_agent import BaseAgent
@@ -71,11 +72,11 @@ class TitleMetaOptimizer(BaseAgent):
     TITLE_FORMULAS = {
         "number_list": "{Number} {Keyword} {Benefit}",
         "how_to": "How to {Keyword}: {Benefit}",
-        "complete_guide": "The Complete Guide to {Keyword} ({Year})",
+        "complete_guide": "The Complete Guide to {Keyword} ({Year})", # Restored with smart year
         "ultimate": "Ultimate {Keyword} Guide: {Benefit}",
         "question": "{Question}? Here's What You Need to Know",
         "comparison": "{Keyword} vs {Alternative}: Which is Better?",
-        "best_of": "Best {Keyword} in {Year}: Top {Number} Reviewed",
+        "best_of": "Best {Keyword} in {Year}: Top {Number} Reviewed", # Restored with smart year
         "secrets": "{Number} {Keyword} Secrets {Outcome}",
         "mistakes": "{Number} {Keyword} Mistakes to Avoid",
         "step_by_step": "{Keyword} Step by Step ({Time} Guide)"
@@ -198,7 +199,7 @@ class TitleMetaOptimizer(BaseAgent):
     ) -> List[TitleVariation]:
         """Generate title variations using formulas"""
         variations = []
-        year = "2026"
+        current_year = str(datetime.now().year) # Smart dynamic year
         
         # Base keyword processing
         keyword_title = keyword.title()
@@ -223,7 +224,7 @@ class TitleMetaOptimizer(BaseAgent):
         ))
         
         # Formula: Best of (year)
-        title = f"Best {keyword_title} in {year}: Top 5 Expert Picks"
+        title = f"Best {keyword_title} in {current_year}: Top 5 Expert Picks"
         variations.append(self._create_title_variation(
             title, keyword, "best_of"
         ))
@@ -323,8 +324,9 @@ class TitleMetaOptimizer(BaseAgent):
         if re.search(r'\d+', title):
             score += 8
         
-        # Year (freshness signal)
-        if "2026" in title or "2025" in title:
+        # Year (freshness signal) - Smart dynamic check
+        current_year = str(datetime.now().year)
+        if current_year in title:
             score += 5
         
         return min(score, 100)
@@ -335,9 +337,10 @@ class TitleMetaOptimizer(BaseAgent):
         if not re.search(r'\d+', title):
             title = "5 " + title
         
-        # Add year if missing and appropriate
+        # Add year if missing and appropriate (Smart)
+        current_year = str(datetime.now().year)
         if "guide" in title.lower() and "202" not in title:
-            title = title + " (2026)"
+            title = title + f" ({current_year})"
         
         return title
     
@@ -363,8 +366,9 @@ class TitleMetaOptimizer(BaseAgent):
         
         # Intent-specific templates
         if intent == "commercial":
+            current_year = str(datetime.now().year)
             variations.append(self._create_meta_variation(
-                f"Compare the best {keyword} options in 2026. Read expert reviews, pros & cons, and find your perfect match. {self.CTA_PHRASES[3]}",
+                f"Compare the best {keyword} options in {current_year}. Read expert reviews, pros & cons, and find your perfect match. {self.CTA_PHRASES[3]}",
                 keyword
             ))
         
