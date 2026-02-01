@@ -1,6 +1,0 @@
-{
-  "python_version": "3.11",
-  "build_command": "pip install -r requirements-prod.txt && cd src/dashboard && npm install && npm run build && cd ../..",
-  "start_command": "bash scripts/entrypoint.sh",
-  "install_command": "pip install -r requirements-prod.txt"
-}
