@@ -9,6 +9,7 @@ DB_PORT="${DB_PORT:-5432}"
 REDIS_HOST="${REDIS_HOST:-redis}"
 REDIS_PORT="${REDIS_PORT:-6379}"
 MAX_WAIT="${MAX_WAIT:-60}"
+SKIP_WAIT="${SKIP_WAIT:-false}"
 
 # Auto-detect from DATABASE_URL if DB_HOST is default
 if [ -n "$DATABASE_URL" ] && [ "$DB_HOST" = "db" ]; then
@@ -26,7 +27,18 @@ if [ -n "$REDIS_URL" ] && [ "$REDIS_HOST" = "redis" ]; then
 fi
 
 echo "🚀 Starting AI Marketing Content System..."
-echo "📊 Waiting for dependencies..."
+
+# Auto-detect Zeabur environment and skip wait if using managed services
+if [ -n "$ZEABUR" ] || [ -n "$ZEABUR_SERVICE_ID" ]; then
+    echo "🔵 Zeabur environment detected"
+    # If using Zeabur managed database/redis, skip wait
+    if [[ "$DATABASE_URL" == *"zeabur"* ]] || [[ "$REDIS_URL" == *"zeabur"* ]]; then
+        echo "📦 Using Zeabur managed services, skipping dependency wait"
+        SKIP_WAIT="true"
+    fi
+fi
+
+echo "📊 Checking dependencies..."
 
 # Function to wait for a service
 wait_for_service() {
@@ -53,11 +65,16 @@ wait_for_service() {
     fi
 }
 
-# Wait for PostgreSQL
-wait_for_service "$DB_HOST" "$DB_PORT" "PostgreSQL"
+# Skip dependency wait if SKIP_WAIT is set (useful for managed services like Zeabur)
+if [ "$SKIP_WAIT" = "true" ]; then
+    echo "⏭️  Skipping dependency wait (SKIP_WAIT=true)"
+else
+    # Wait for PostgreSQL
+    wait_for_service "$DB_HOST" "$DB_PORT" "PostgreSQL"
 
-# Wait for Redis
-wait_for_service "$REDIS_HOST" "$REDIS_PORT" "Redis"
+    # Wait for Redis
+    wait_for_service "$REDIS_HOST" "$REDIS_PORT" "Redis"
+fi
 
 echo "✅ Dependency checks completed."
 echo "🌐 Starting uvicorn server..."
