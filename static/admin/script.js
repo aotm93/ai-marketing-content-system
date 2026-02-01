@@ -45,6 +45,18 @@ function setupEventListeners() {
     logoutBtn.addEventListener('click', handleLogout);
     saveAllBtn.addEventListener('click', handleSaveAll);
     refreshBtn.addEventListener('click', loadConfiguration);
+
+    // Website Analysis Cache event listeners
+    const saveWebsiteAnalysisBtn = document.getElementById('saveWebsiteAnalysisBtn');
+    const refreshWebsiteAnalysisBtn = document.getElementById('refreshWebsiteAnalysisBtn');
+
+    if (saveWebsiteAnalysisBtn) {
+        saveWebsiteAnalysisBtn.addEventListener('click', saveWebsiteAnalysisConfig);
+    }
+
+    if (refreshWebsiteAnalysisBtn) {
+        refreshWebsiteAnalysisBtn.addEventListener('click', refreshWebsiteAnalysis);
+    }
 }
 
 // Handle login
@@ -101,6 +113,9 @@ async function loadConfiguration() {
             const result = await response.json();
             populateConfigFields(result.data);
             showMessage('Configuration loaded successfully', 'success');
+
+            // Also load website analysis config
+            await loadWebsiteAnalysisConfig();
         } else {
             showMessage('Failed to load configuration', 'error');
         }
@@ -304,4 +319,131 @@ function showMessage(message, type) {
     setTimeout(() => {
         messageBox.classList.remove('show');
     }, 5000);
+}
+
+// ========================================
+// Website Analysis Cache Configuration
+// ========================================
+
+// Load website analysis cache configuration
+async function loadWebsiteAnalysisConfig() {
+    try {
+        const response = await fetch(`${API_BASE}/website-analysis/config`, {
+            credentials: 'include'
+        });
+
+        if (response.ok) {
+            const result = await response.json();
+
+            // Update cache duration input
+            const cacheDaysInput = document.getElementById('WEBSITE_ANALYSIS_CACHE_DAYS');
+            if (cacheDaysInput && result.cache_days) {
+                cacheDaysInput.value = result.cache_days;
+            }
+
+            // Update cache status display
+            updateCacheStatusDisplay(result);
+        } else {
+            console.error('Failed to load website analysis config');
+        }
+    } catch (error) {
+        console.error('Error loading website analysis config:', error);
+    }
+}
+
+// Update cache status display
+function updateCacheStatusDisplay(result) {
+    const cacheAgeEl = document.getElementById('cacheAge');
+    const nextAnalysisEl = document.getElementById('nextAnalysis');
+
+    if (cacheAgeEl && nextAnalysisEl) {
+        if (result.cache_age_days !== null && result.cache_age_days !== undefined) {
+            cacheAgeEl.textContent = `Cache Age: ${result.cache_age_days.toFixed(1)} days`;
+
+            if (result.next_analysis_days !== null && result.next_analysis_days > 0) {
+                nextAnalysisEl.textContent = `Next Analysis: in ${result.next_analysis_days.toFixed(1)} days`;
+            } else {
+                nextAnalysisEl.textContent = `Next Analysis: Will run on next job`;
+            }
+        } else {
+            cacheAgeEl.textContent = 'Cache Age: No cache yet';
+            nextAnalysisEl.textContent = 'Next Analysis: Will run on first job';
+        }
+    }
+}
+
+// Save website analysis cache duration
+async function saveWebsiteAnalysisConfig() {
+    const cacheDaysInput = document.getElementById('WEBSITE_ANALYSIS_CACHE_DAYS');
+    const saveBtn = document.getElementById('saveWebsiteAnalysisBtn');
+
+    if (!cacheDaysInput || !cacheDaysInput.value) {
+        showMessage('Please enter cache duration (1-30 days)', 'error');
+        return;
+    }
+
+    const cacheDays = parseInt(cacheDaysInput.value);
+    if (cacheDays < 1 || cacheDays > 30) {
+        showMessage('Cache duration must be between 1 and 30 days', 'error');
+        return;
+    }
+
+    saveBtn.disabled = true;
+    saveBtn.textContent = 'Saving...';
+
+    try {
+        const response = await fetch(`${API_BASE}/website-analysis/config`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            credentials: 'include',
+            body: JSON.stringify({ cache_days: cacheDays })
+        });
+
+        if (response.ok) {
+            showMessage(`✅ Cache duration updated to ${cacheDays} days`, 'success');
+            await loadWebsiteAnalysisConfig();
+        } else {
+            const result = await response.json();
+            showMessage(`Failed to save: ${result.detail || 'Unknown error'}`, 'error');
+        }
+    } catch (error) {
+        showMessage('Connection error while saving configuration', 'error');
+    } finally {
+        saveBtn.disabled = false;
+        saveBtn.textContent = '💾 Save Cache Duration';
+    }
+}
+
+// Force refresh website analysis (clear cache)
+async function refreshWebsiteAnalysis() {
+    const refreshBtn = document.getElementById('refreshWebsiteAnalysisBtn');
+
+    if (!confirm('This will clear the cache and trigger re-analysis on the next job run. Continue?')) {
+        return;
+    }
+
+    refreshBtn.disabled = true;
+    refreshBtn.textContent = 'Refreshing...';
+
+    try {
+        const response = await fetch(`${API_BASE}/website-analysis/refresh`, {
+            method: 'POST',
+            credentials: 'include'
+        });
+
+        if (response.ok) {
+            showMessage('✅ Cache cleared. Next job will trigger re-analysis.', 'success');
+            await loadWebsiteAnalysisConfig();
+        } else {
+            const result = await response.json();
+            showMessage(`Failed to refresh: ${result.detail || 'Unknown error'}`, 'error');
+        }
+    } catch (error) {
+        showMessage('Connection error while refreshing', 'error');
+    } finally {
+        refreshBtn.disabled = false;
+        refreshBtn.textContent = '🔄 Force Re-Analysis Now';
+    }
 }

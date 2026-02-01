@@ -313,6 +313,47 @@
                     </div>
                 </div>
 
+                <!-- Website Analysis Cache Configuration -->
+                <div class="config-section">
+                    <h3>🔍 Website Analysis Cache</h3>
+                    <div class="config-grid">
+                        <p style="grid-column: span 3; color: #666; font-size: 0.9em; margin-bottom: 15px;">
+                            Controls how often the system analyzes your website content to generate intelligent keywords.
+                            New websites change infrequently, so a longer cache duration (7-30 days) reduces API calls.
+                            Mature websites with frequent updates may benefit from shorter durations (1-3 days).
+                        </p>
+                        <div class="config-item">
+                            <label>Cache Duration (Days)</label>
+                            <input type="number" id="WEBSITE_ANALYSIS_CACHE_DAYS" class="config-input"
+                                   min="1" max="30" placeholder="7">
+                            <small style="color: #666; display: block; margin-top: 5px;">
+                                Range: 1-30 days. Default: 7 days.
+                            </small>
+                        </div>
+                        <div class="config-item">
+                            <label>Cache Status</label>
+                            <div id="cacheStatus" style="padding: 10px; background: #f3f4f6; border-radius: 6px; font-size: 0.9em;">
+                                <div id="cacheAge" style="margin-bottom: 5px;">Cache Age: Loading...</div>
+                                <div id="nextAnalysis">Next Analysis: Loading...</div>
+                            </div>
+                        </div>
+                        <div class="config-item">
+                            <label>Manual Actions</label>
+                            <div style="display: flex; gap: 10px; flex-direction: column;">
+                                <button id="saveWebsiteAnalysisBtn" class="btn btn-primary" style="width: 100%;">
+                                    💾 Save Cache Duration
+                                </button>
+                                <button id="refreshWebsiteAnalysisBtn" class="btn btn-secondary" style="width: 100%;">
+                                    🔄 Force Re-Analysis Now
+                                </button>
+                            </div>
+                            <small style="color: #666; display: block; margin-top: 5px;">
+                                Force re-analysis clears cache and triggers immediate website content analysis on next job run.
+                            </small>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- System Configuration -->
                 <div class="config-section">
                     <h3>⚙️ System Configuration</h3>
