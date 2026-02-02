@@ -31,7 +31,7 @@ def get_website_analysis_cache_duration() -> int:
     """
     try:
         from src.models.config import SystemConfig
-        from src.database import get_db
+        from src.core.database import get_db
 
         db = next(get_db())
         config = db.query(SystemConfig).filter(
@@ -130,7 +130,7 @@ async def content_generation_job(data: Dict[str, Any]) -> Dict[str, Any]:
 
         # Get already used keywords from database
         from src.models.keyword import Keyword, KeywordStatus
-        from src.database import get_db
+        from src.core.database import get_db
         from datetime import timedelta
 
         db = next(get_db())
