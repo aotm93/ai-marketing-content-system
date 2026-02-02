@@ -420,12 +420,12 @@ async function saveWebsiteAnalysisConfig() {
 async function refreshWebsiteAnalysis() {
     const refreshBtn = document.getElementById('refreshWebsiteAnalysisBtn');
 
-    if (!confirm('This will clear the cache and trigger re-analysis on the next job run. Continue?')) {
+    if (!confirm('This will immediately analyze your website content (may take 10-30 seconds). Continue?')) {
         return;
     }
 
     refreshBtn.disabled = true;
-    refreshBtn.textContent = 'Refreshing...';
+    refreshBtn.textContent = '🔄 Analyzing...';
 
     try {
         const response = await fetch(`${API_BASE}/website-analysis/refresh`, {
@@ -433,15 +433,18 @@ async function refreshWebsiteAnalysis() {
             credentials: 'include'
         });
 
-        if (response.ok) {
-            showMessage('✅ Cache cleared. Next job will trigger re-analysis.', 'success');
+        const result = await response.json();
+
+        if (response.ok && result.success) {
+            showMessage(result.message || '✅ Website analysis completed successfully!', 'success');
             await loadWebsiteAnalysisConfig();
         } else {
-            const result = await response.json();
-            showMessage(`Failed to refresh: ${result.detail || 'Unknown error'}`, 'error');
+            const errorMsg = result.message || result.detail || 'Analysis failed';
+            showMessage(errorMsg, result.success === false ? 'warning' : 'error');
+            await loadWebsiteAnalysisConfig();
         }
     } catch (error) {
-        showMessage('Connection error while refreshing', 'error');
+        showMessage('Connection error while analyzing website', 'error');
     } finally {
         refreshBtn.disabled = false;
         refreshBtn.textContent = '🔄 Force Re-Analysis Now';

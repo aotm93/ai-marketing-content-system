@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
+import asyncio
 from src.config import settings
 from src.api.admin import router as admin_router
 from src.api.autopilot import router as autopilot_router
@@ -126,7 +127,32 @@ async def lifespan(app: FastAPI):
 
         except Exception as e:
             logger.error(f"Failed to initialize autopilot: {e}")
-    
+
+    # Initialize website analysis cache on startup
+    try:
+        from src.scheduler.jobs import _website_profile_cache, analyze_website_now
+
+        # Check if cache is empty (first deployment)
+        if _website_profile_cache["profile"] is None:
+            logger.info("🔍 First deployment detected - triggering initial website analysis...")
+            try:
+                # Use await instead of asyncio.run() since we're already in async context
+                # Add 60 second timeout to prevent startup hanging
+                profile = await asyncio.wait_for(
+                    analyze_website_now(),
+                    timeout=60.0
+                )
+                if profile:
+                    logger.info(f"✅ Initial website analysis complete: {len(profile.product_categories)} categories found")
+                else:
+                    logger.warning("⚠️ Initial website analysis failed - will use fallback keywords")
+            except asyncio.TimeoutError:
+                logger.warning("⚠️ Website analysis timed out (60s) - will use fallback keywords")
+        else:
+            logger.info("Website analysis cache already populated")
+    except Exception as e:
+        logger.warning(f"Failed to initialize website analysis: {e}")
+
     logger.info("System startup complete")
     
     yield

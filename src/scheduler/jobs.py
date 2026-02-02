@@ -49,6 +49,44 @@ def get_website_analysis_cache_duration() -> int:
     return _website_profile_cache["default_cache_duration"]
 
 
+async def analyze_website_now():
+    """
+    Perform website analysis immediately and update cache
+
+    Returns:
+        WebsiteProfile or None if analysis fails
+    """
+    global _website_profile_cache
+
+    try:
+        from src.services.website_analyzer import WebsiteAnalyzer
+        from src.integrations.wordpress_client import WordPressClient
+
+        logger.info("Starting website analysis...")
+
+        wp_client = WordPressClient(
+            base_url=settings.wordpress_url,
+            username=settings.wordpress_username,
+            password=settings.wordpress_password
+        )
+
+        analyzer = WebsiteAnalyzer(wp_client)
+        profile = await analyzer.analyze_website(max_posts=30)
+
+        # Update cache
+        _website_profile_cache["profile"] = profile
+        _website_profile_cache["timestamp"] = datetime.now()
+
+        logger.info(f"✅ Website analysis complete: {len(profile.product_categories)} categories, "
+                   f"Business: {profile.business_type}, "
+                   f"Target: {profile.target_audience}")
+        return profile
+
+    except Exception as e:
+        logger.error(f"❌ Website analysis failed: {e}")
+        return None
+
+
 async def get_cached_website_profile():
     """
     Get cached website profile or analyze if cache expired
@@ -67,31 +105,9 @@ async def get_cached_website_profile():
             logger.info(f"Using cached website profile (age: {cache_days:.1f} days, expires in {(cache_duration - cache_age) / 86400:.1f} days)")
             return _website_profile_cache["profile"]
 
-    # Cache expired or not available, analyze website
-    try:
-        from src.services.website_analyzer import WebsiteAnalyzer
-        from src.integrations.wordpress_client import WordPressClient
-
-        wp_client = WordPressClient(
-            base_url=settings.wordpress_url,
-            username=settings.wordpress_username,
-            password=settings.wordpress_password
-        )
-
-        analyzer = WebsiteAnalyzer(wp_client)
-        profile = await analyzer.analyze_website(max_posts=30)
-
-        # Update cache
-        _website_profile_cache["profile"] = profile
-        _website_profile_cache["timestamp"] = datetime.now()
-
-        logger.info(f"Website analysis complete: {len(profile.product_categories)} categories, "
-                   f"Business: {profile.business_type}")
-        return profile
-
-    except Exception as e:
-        logger.warning(f"Website analysis failed: {e}")
-        return None
+    # Cache expired or not available, trigger analysis
+    logger.info("Cache expired or empty, triggering website analysis...")
+    return await analyze_website_now()
 
 
 async def content_generation_job(data: Dict[str, Any]) -> Dict[str, Any]:

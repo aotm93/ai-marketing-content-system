@@ -496,19 +496,28 @@ async def refresh_website_analysis(
     admin: dict = Depends(get_current_admin)
 ):
     """
-    Manually trigger website analysis refresh (clears cache)
+    Manually trigger immediate website analysis (clears cache and runs analysis now)
     """
     try:
-        from src.scheduler.jobs import _website_profile_cache
+        from src.scheduler.jobs import analyze_website_now, _website_profile_cache
 
-        # Clear cache to force re-analysis on next run
+        # Clear cache first
         _website_profile_cache["profile"] = None
         _website_profile_cache["timestamp"] = None
 
-        return WebsiteAnalysisConfigResponse(
-            success=True,
-            message="Website analysis cache cleared. Next content generation will trigger re-analysis."
-        )
+        # Trigger immediate analysis
+        profile = await analyze_website_now()
+
+        if profile:
+            return WebsiteAnalysisConfigResponse(
+                success=True,
+                message=f"✅ Website analysis completed! Found {len(profile.product_categories)} product categories. Business: {profile.business_type}"
+            )
+        else:
+            return WebsiteAnalysisConfigResponse(
+                success=False,
+                message="⚠️ Website analysis failed. Check logs for details. Will retry on next content generation job."
+            )
 
     except Exception as e:
         raise HTTPException(
