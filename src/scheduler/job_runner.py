@@ -193,10 +193,9 @@ class JobRunner:
     def update_config(self, config: JobConfig):
         """Update runner configuration"""
         self.config = config
-        self.rate_limiter = RateLimiter(
-            max_per_day=config.max_posts_per_day,
-            interval_minutes=config.publish_interval_minutes
-        )
+        # Update rate limiter parameters without resetting counters
+        self.rate_limiter.max_per_day = config.max_posts_per_day
+        self.rate_limiter.interval_minutes = config.publish_interval_minutes
         self.semaphore = asyncio.Semaphore(config.max_concurrent_jobs)
         logger.info("JobRunner configuration updated")
     
