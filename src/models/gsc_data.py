@@ -269,3 +269,113 @@ class TopicCluster(Base, TimestampMixin):
             "total_internal_links": self.total_internal_links,
             "is_active": bool(self.is_active)
         }
+
+
+class GSCApiUsage(Base, TimestampMixin):
+    """
+    GSC API Usage Tracking
+    
+    Tracks daily API quota consumption for:
+    - Quota monitoring and alerting
+    - Cost optimization
+    - Usage pattern analysis
+    - Rate limiting
+    """
+    __tablename__ = "gsc_api_usage"
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    
+    # Date tracking (daily granularity)
+    usage_date = Column(Date, nullable=False, index=True)
+    
+    # API call details
+    call_type = Column(String(50), nullable=False, index=True)
+    # Types: search_analytics, sites_list, url_inspection, sitemap_submit
+    
+    # Usage metrics
+    rows_fetched = Column(Integer, default=0)  # Number of data rows returned
+    api_calls = Column(Integer, default=1)  # Number of API calls (usually 1 per operation)
+    
+    # Cost estimation (GSC API is free, but track for analysis)
+    estimated_cost = Column(Float, default=0.0)  # USD
+    
+    # Operation details
+    site_url = Column(String(255), nullable=True)
+    date_range_start = Column(Date, nullable=True)
+    date_range_end = Column(Date, nullable=True)
+    
+    # Performance
+    response_time_ms = Column(Integer, nullable=True)  # Response time in milliseconds
+    
+    # Status
+    success = Column(Integer, default=1)  # 1 = success, 0 = failed
+    error_message = Column(Text, nullable=True)
+    
+    # Source tracking
+    triggered_by = Column(String(50), default="system")  # autopilot, manual, scheduled_task
+    job_run_id = Column(String(36), nullable=True)  # Link to job_runs table
+    
+    __table_args__ = (
+        Index('ix_gsc_usage_date_type', 'usage_date', 'call_type'),
+        Index('ix_gsc_usage_site_date', 'site_url', 'usage_date'),
+    )
+    
+    def __repr__(self):
+        return f"<GSCApiUsage(date={self.usage_date}, type={self.call_type}, rows={self.rows_fetched})>"
+
+
+class GSCQuotaStatus(Base, TimestampMixin):
+    """
+    GSC API Quota Status
+    
+    Daily quota tracking and alerting
+    """
+    __tablename__ = "gsc_quota_status"
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    
+    # Date
+    quota_date = Column(Date, nullable=False, unique=True, index=True)
+    
+    # Daily quota (Google's limit: 2000 calls/day)
+    daily_limit = Column(Integer, default=2000)
+    used_today = Column(Integer, default=0)
+    remaining = Column(Integer, default=2000)
+    
+    # Breakdown by call type
+    usage_breakdown = Column(Text, nullable=True)  # JSON: {"search_analytics": 1500, "sites_list": 100}
+    
+    # Alert thresholds
+    warning_threshold = Column(Integer, default=1600)  # 80%
+    critical_threshold = Column(Integer, default=1800)  # 90%
+    
+    # Status
+    status = Column(String(20), default="healthy")  # healthy, warning, critical, exceeded
+    last_alert_sent = Column(DateTime, nullable=True)
+    
+    # Projections
+    projected_usage = Column(Integer, nullable=True)  # Projected usage by end of day
+    
+    def __repr__(self):
+        return f"<GSCQuotaStatus(date={self.quota_date}, used={self.used_today}, status={self.status})>"
+    
+    @property
+    def usage_percentage(self) -> float:
+        """Calculate usage percentage"""
+        if self.daily_limit == 0:
+            return 0.0
+        return round((self.used_today / self.daily_limit) * 100, 1)
+    
+    def update_status(self):
+        """Update status based on thresholds"""
+        usage_pct = self.usage_percentage
+        
+        if usage_pct >= 100:
+            self.status = "exceeded"
+        elif usage_pct >= 90:
+            self.status = "critical"
+        elif usage_pct >= 80:
+            self.status = "warning"
+        else:
+            self.status = "healthy"
+

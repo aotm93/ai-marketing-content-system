@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Query
 from pydantic import BaseModel
 from typing import List, Optional
 from sqlalchemy.orm import Session
@@ -99,3 +99,58 @@ async def check_indexing(
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/pages/attention")
+async def get_pages_needing_attention(
+    limit: int = Query(50, ge=1, le=100),
+    db: Session = Depends(get_db),
+    admin: dict = Depends(get_current_admin)
+):
+    """Get pages that need manual attention"""
+    from src.services.index_checker import IndexChecker
+    
+    checker = IndexChecker(db)
+    return checker.get_pages_needing_attention(limit)
+
+
+@router.post("/check/{post_id}")
+async def check_page_index_status(
+    post_id: int,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    admin: dict = Depends(get_current_admin)
+):
+    """Trigger index check for a specific page"""
+    from src.models.indexing_status import IndexingStatus
+    
+    page = db.query(IndexingStatus).filter(
+        IndexingStatus.post_id == post_id
+    ).first()
+    
+    if not page:
+        raise HTTPException(status_code=404, detail="Page not found")
+    
+    # Run check in background
+    from src.services.index_checker import IndexChecker
+    checker = IndexChecker(db)
+    background_tasks.add_task(
+        checker.check_page_index_status,
+        page.page_url
+    )
+    
+    return {"status": "checking", "url": page.page_url}
+
+
+@router.post("/check-all")
+async def run_index_checks(
+    batch_size: int = Query(50, ge=1, le=200),
+    db: Session = Depends(get_db),
+    admin: dict = Depends(get_current_admin)
+):
+    """Run scheduled index checks"""
+    from src.services.index_checker import IndexChecker
+    
+    checker = IndexChecker(db)
+    results = await checker.run_scheduled_checks(batch_size)
+    return results

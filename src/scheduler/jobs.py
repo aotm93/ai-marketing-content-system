@@ -1166,3 +1166,61 @@ def register_all_jobs(autopilot):
     for job_type, job_func in JOB_REGISTRY.items():
         autopilot.register_job(job_type, job_func)
     logger.info(f"Registered {len(JOB_REGISTRY)} jobs with autopilot")
+
+
+# ==================== Index Status Check Job ====================
+
+async def scheduled_index_status_check():
+    """
+    Daily job to check indexing status
+    
+    Runs automatically to:
+    1. Check indexing status for pages due
+    2. Auto-retry non-indexed pages
+    3. Send alerts for issues
+    """
+    from src.services.index_checker import IndexChecker
+    from src.core.database import get_db
+    
+    logger.info("Starting scheduled index status check...")
+    
+    try:
+        db = next(get_db())
+        checker = IndexChecker(db)
+        
+        # Run scheduled checks
+        results = await checker.run_scheduled_checks(batch_size=100)
+        
+        logger.info(f"Index check completed: {results}")
+        
+        # Send alert if many pages not indexed
+        coverage = checker.get_coverage_report()
+        if coverage["index_rate"] < 50 and coverage["total_pages"] > 10:
+            logger.warning(
+                f"Low index rate detected: {coverage['index_rate']}% "
+                f"({coverage['indexed']}/{coverage['total_pages']} pages)"
+            )
+            # TODO: Send notification (email, slack, etc.)
+            
+        # Alert for pages needing attention
+        attention_pages = checker.get_pages_needing_attention(limit=10)
+        if attention_pages:
+            logger.warning(
+                f"{len(attention_pages)} pages need manual attention"
+            )
+            
+    except Exception as e:
+        logger.error(f"Index status check failed: {e}")
+    finally:
+        db.close()
+
+
+# Register index check job (not in main registry, scheduled separately)
+INDEX_CHECK_JOB = {
+    "func": scheduled_index_status_check,
+    "trigger": "cron",
+    "hour": 2,  # Run at 2 AM daily
+    "minute": 0,
+    "id": "index_status_check",
+    "replace_existing": True
+}
