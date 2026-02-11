@@ -1,0 +1,15 @@
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Query
+from sqlalchemy.orm import Session
+from src.core.database import get_db
+from src.core.auth import get_current_admin
+from src.services.index_checker import IndexChecker
+
+router = APIRouter(prefix='/api/v1/indexing', tags=['indexing'])
+
+@router.get('/status')
+async def get_indexing_status(
+    db: Session = Depends(get_db),
+    admin: dict = Depends(get_current_admin)
+):
+    checker = IndexChecker(db)
+    return checker.get_coverage_report() TechZenflowProjectsbobopkgprojectsrcapiindexing.py

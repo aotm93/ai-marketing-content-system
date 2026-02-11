@@ -5,6 +5,18 @@
 [![Version](https://img.shields.io/badge/version-4.1.0-blue.svg)](https://github.com/yourusername/seo-autopilot)
 [![Python](https://img.shields.io/badge/python-3.10+-green.svg)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-MIT-orange.svg)](LICENSE)
+[![Status](https://img.shields.io/badge/status-开发版本-yellow.svg)](REPAIR_PLAN.md)
+
+## ⚠️ 项目状态
+
+**当前状态**: 开发版本 (代码完成度 65%)  
+**目标状态**: 生产就绪 (代码完成度 90%+)  
+
+**📋 查看 [REPAIR_PLAN.md](REPAIR_PLAN.md) 了解修复方案**
+
+本项目已完成功能框架，但需要修复关键问题才能达到生产就绪。详见修复方案文档。
+
+---
 
 ## 🚀 概述
 
@@ -118,11 +130,16 @@ GET  /api/v1/pseo/preview       # 预览生成
 
 ## 📖 文档
 
-完整文档:
+### 核心文档
 
-- [部署指南](DEPLOYMENT.md)
+- [📋 修复方案](REPAIR_PLAN.md) - **必读** 生产就绪修复计划
+- [🚀 部署指南](DEPLOYMENT.md) - 部署和配置说明
+- [📊 GSC 设置指南](docs/GSC_SETUP_GUIDE.md) - Google Search Console 配置
+- [🏗️ 项目结构](docs/PROJECT_STRUCTURE.md) - 代码架构说明
+
+### 其他
+
 - [GitHub 集成指南](GITHUB_INTEGRATION.md)
-- [升级路线图](docs/UPGRADE_ROADMAP.md)
 
 ---
 

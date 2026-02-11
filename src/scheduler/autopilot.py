@@ -10,7 +10,7 @@ Features:
 """
 
 import logging
-from datetime import datetime
+from datetime import datetime, date
 from typing import Dict, Any, Optional, Callable
 from dataclasses import dataclass
 from enum import Enum
@@ -26,7 +26,7 @@ except ImportError:
     APSCHEDULER_AVAILABLE = False
     AsyncIOScheduler = None
 
-from .job_runner import JobConfig, get_job_runner
+from .job_runner import JobConfig, JobStatus, get_job_runner
 
 logger = logging.getLogger(__name__)
 
@@ -164,6 +164,8 @@ class AutopilotScheduler:
         self._total_runs = 0
         self._successful_runs = 0
         self._last_run: Optional[datetime] = None
+        self._last_error_reset_date: date = date.today()
+        self._paused_by_errors: bool = False
         
         # Registered job functions
         self._job_functions: Dict[str, Callable] = {}
@@ -285,21 +287,35 @@ class AutopilotScheduler:
         """Execute one content generation cycle"""
         self._total_runs += 1
         self._last_run = datetime.now()
-        
+
         logger.info(f"Starting generation cycle #{self._total_runs}")
-        
+
+        # Check if it's a new day - reset error counter and auto-resume if paused by errors
+        today = date.today()
+        if today > self._last_error_reset_date:
+            logger.info(f"New day detected, resetting error counter (was {self._consecutive_errors})")
+            self._consecutive_errors = 0
+            self._last_error_reset_date = today
+
+            # Auto-resume if paused by errors
+            if self._paused_by_errors:
+                logger.info("Auto-resuming scheduler after daily reset")
+                self._paused_by_errors = False
+                self.resume()
+
         # Check if within active hours
         current_hour = datetime.now().hour
         if not (self.config.active_hours_start <= current_hour < self.config.active_hours_end):
             logger.info(f"Outside active hours ({self.config.active_hours_start}-{self.config.active_hours_end})")
             return
-        
+
         # Check consecutive errors threshold
         if self._consecutive_errors >= self.config.pause_on_errors:
             logger.warning(f"Paused due to {self._consecutive_errors} consecutive errors")
+            self._paused_by_errors = True
             self.pause()
             return
-        
+
         try:
             # Get the main generation job
             if "content_generation" in self._job_functions:
@@ -309,13 +325,18 @@ class AutopilotScheduler:
                     job_func=job_func,
                     job_data={"config": self.config}
                 )
-                
-                if result.status.value == "success":
+
+                # Only count actual errors, not rate limiting
+                if result.status == JobStatus.SUCCESS:
                     self._successful_runs += 1
                     self._consecutive_errors = 0
+                elif result.status == JobStatus.RATE_LIMITED:
+                    # Rate limiting is expected behavior, not an error
+                    logger.debug("Rate limited - not counting as error")
                 else:
+                    # Real errors: FAILED, TIMEOUT, CANCELLED
                     self._consecutive_errors += 1
-                    
+
         except Exception as e:
             logger.error(f"Generation cycle failed: {e}")
             self._consecutive_errors += 1
@@ -398,7 +419,9 @@ class AutopilotScheduler:
             "total_runs_today": self._total_runs,
             "successful_runs_today": self._successful_runs,
             "consecutive_errors": self._consecutive_errors,
+            "paused_by_errors": self._paused_by_errors,
             "last_run": self._last_run.isoformat() if self._last_run else None,
+            "last_error_reset_date": self._last_error_reset_date.isoformat(),
             "registered_jobs": list(self._job_functions.keys()),
             "job_runner_status": self.job_runner.get_status(),
             "config": {
