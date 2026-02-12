@@ -50,6 +50,10 @@ class Settings(BaseSettings):
     keyword_api_username: Optional[str] = None  # Added for DataForSEO (Email)
     keyword_api_base_url: Optional[str] = None
 
+    # Email (Resend)
+    resend_api_key: Optional[str] = None
+    resend_from_email: Optional[str] = None
+
     # System
     environment: str = "development"
     log_level: str = "INFO"

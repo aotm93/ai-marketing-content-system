@@ -10,7 +10,9 @@ Features:
 
 import logging
 import httpx
-from typing import List, Optional
+import base64
+import time
+from typing import List, Optional, Dict, Any
 from dataclasses import dataclass
 from src.config import settings
 
@@ -24,6 +26,10 @@ class KeywordOpportunity:
     cpc: float = 0.0
     intent: str = "informational"
     source: str = "api"
+
+# Simple in-memory cache with TTL (defined after KeywordOpportunity to avoid forward reference)
+_cache: Dict[str, tuple[Any, float]] = {}
+_CACHE_TTL_SECONDS = 300  # 5 minutes
 
 class KeywordClient:
     """
@@ -87,9 +93,158 @@ class KeywordClient:
             return results
 
     async def _fetch_dataforseo(self, seed: str, limit: int) -> List[KeywordOpportunity]:
-        """Mock DataForSEO style implementation"""
-        # ... logic specific to DataForSEO structure ...
-        pass
+        """
+        Fetch keyword data from DataForSEO API.
+        Uses HTTP Basic Auth with base64 encoded username:password.
+        """
+        if not self.api_key or not self.api_username:
+            logger.warning("DataForSEO credentials not configured (api_username and api_key required)")
+            return []
+        
+        # Check cache first
+        cache_key = f"{seed}:{limit}"
+        if cache_key in _cache:
+            cached_result, timestamp = _cache[cache_key]
+            if time.time() - timestamp < _CACHE_TTL_SECONDS:
+                logger.debug(f"Returning cached results for '{seed}'")
+                return cached_result
+            else:
+                # Cache expired
+                del _cache[cache_key]
+        
+        try:
+            base_url = self.base_url or "https://api.dataforseo.com"
+            
+            # Create HTTP Basic Auth header
+            credentials = f"{self.api_username}:{self.api_key}"
+            auth_header = base64.b64encode(credentials.encode()).decode()
+            
+            async with httpx.AsyncClient() as client:
+                all_results: List[KeywordOpportunity] = []
+                
+                # 1. Call keyword_suggestions endpoint
+                try:
+                    response = await client.post(
+                        f"{base_url}/v3/dataforseo_labs/google/keyword_suggestions/live",
+                        json=[{
+                            "keyword": seed,
+                            "limit": min(limit, 100)
+                        }],
+                        headers={"Authorization": f"Basic {auth_header}", "Content-Type": "application/json"},
+                        timeout=30.0
+                    )
+                    
+                    if response.status_code == 200:
+                        data = response.json()
+                        tasks = data.get("tasks", [])
+                        if tasks and len(tasks) > 0:
+                            result = tasks[0].get("result", [])
+                            if result and len(result) > 0:
+                                items = result[0].get("items", [])
+                                for item in items[:limit]:
+                                    all_results.append(KeywordOpportunity(
+                                        keyword=item.get("keyword", ""),
+                                        volume=item.get("search_volume", 0),
+                                        difficulty=item.get("competition_index", 50),
+                                        cpc=item.get("cpc", 0.0),
+                                        intent=self._map_dataforseo_intent(item.get("search_intent_info", {})),
+                                        source="dataforseo_suggestions"
+                                    ))
+                    elif response.status_code == 401:
+                        logger.error("DataForSEO authentication failed (401)")
+                        return []
+                    elif response.status_code == 429:
+                        logger.warning("DataForSEO rate limit hit (429)")
+                        return []
+                    else:
+                        logger.warning(f"DataForSEO suggestions endpoint returned {response.status_code}")
+                        
+                except httpx.TimeoutException:
+                    logger.warning("DataForSEO suggestions request timed out")
+                except Exception as e:
+                    logger.error(f"Error fetching keyword suggestions: {e}")
+                
+                # 2. Call related_keywords endpoint if we need more results
+                if len(all_results) < limit:
+                    try:
+                        response = await client.post(
+                            f"{base_url}/v3/dataforseo_labs/google/related_keywords/live",
+                            json=[{
+                                "keyword": seed,
+                                "limit": min(limit - len(all_results), 100)
+                            }],
+                            headers={"Authorization": f"Basic {auth_header}", "Content-Type": "application/json"},
+                            timeout=30.0
+                        )
+                        
+                        if response.status_code == 200:
+                            data = response.json()
+                            tasks = data.get("tasks", [])
+                            if tasks and len(tasks) > 0:
+                                result = tasks[0].get("result", [])
+                                if result and len(result) > 0:
+                                    items = result[0].get("items", [])
+                                    for item in items[:limit - len(all_results)]:
+                                        all_results.append(KeywordOpportunity(
+                                            keyword=item.get("keyword", ""),
+                                            volume=item.get("search_volume", 0),
+                                            difficulty=item.get("competition_index", 50),
+                                            cpc=item.get("cpc", 0.0),
+                                            intent=self._map_dataforseo_intent(item.get("search_intent_info", {})),
+                                            source="dataforseo_related"
+                                        ))
+                    except httpx.TimeoutException:
+                        logger.warning("DataForSEO related keywords request timed out")
+                    except Exception as e:
+                        logger.error(f"Error fetching related keywords: {e}")
+                
+                # 3. Get bulk difficulty for all keywords (optional enhancement)
+                if all_results:
+                    try:
+                        keywords_for_difficulty = [{"keyword": k.keyword} for k in all_results[:100]]
+                        response = await client.post(
+                            f"{base_url}/v3/dataforseo_labs/google/bulk_keyword_difficulty/live",
+                            json=keywords_for_difficulty,
+                            headers={"Authorization": f"Basic {auth_header}", "Content-Type": "application/json"},
+                            timeout=30.0
+                        )
+                        
+                        if response.status_code == 200:
+                            data = response.json()
+                            tasks = data.get("tasks", [])
+                            if tasks and len(tasks) > 0:
+                                result = tasks[0].get("result", [])
+                                if result and len(result) > 0:
+                                    items = result[0].get("items", [])
+                                    # Update difficulty for matching keywords
+                                    difficulty_map = {item.get("keyword", "").lower(): item.get("competition_index", 50) for item in items}
+                                    for opp in all_results:
+                                        if opp.keyword.lower() in difficulty_map:
+                                            opp.difficulty = difficulty_map[opp.keyword.lower()]
+                    except Exception as e:
+                        logger.debug(f"Could not fetch bulk difficulty: {e}")
+                
+                # Store in cache
+                _cache[cache_key] = (all_results, time.time())
+                return all_results
+                
+        except httpx.TimeoutException:
+            logger.error("DataForSEO request timed out")
+            return []
+        except Exception as e:
+            logger.error(f"DataForSEO fetch failed: {e}")
+            return []
+    
+    def _map_dataforseo_intent(self, intent_info: Dict[str, Any]) -> str:
+        """Map DataForSEO intent info to our internal intent format."""
+        intent = intent_info.get("main_intent", "informational")
+        intent_map = {
+            "informational": "informational",
+            "navigational": "navigational",
+            "commercial": "commercial",
+            "transactional": "transactional"
+        }
+        return intent_map.get(intent.lower(), "informational")
 
     async def get_easy_wins(self, seed_keyword: str) -> List[KeywordOpportunity]:
         """

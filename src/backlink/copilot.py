@@ -14,6 +14,7 @@ from typing import Dict, Any, List, Optional
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
+from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
 
@@ -89,62 +90,173 @@ class BacklinkDiscoveryEngine:
     - Google search for brand mentions
     - Competitor backlink analysis
     - Resource page detection
+    
+    Uses DataForSEO Backlinks API for real data.
     """
     
-    def __init__(self, brand_names: List[str], website_url: str):
+    def __init__(
+        self, 
+        brand_names: List[str], 
+        website_url: str,
+        backlinks_client=None,
+        db_session=None
+    ):
         self.brand_names = brand_names
         self.website_url = website_url
         self.opportunities: List[BacklinkOpportunity] = []
+        self.backlinks_client = backlinks_client
+        self.db = db_session
     
     async def find_unlinked_mentions(
         self,
         max_results: int = 50
     ) -> List[BacklinkOpportunity]:
         """
-        Find pages mentioning brand but not linking
+        Find pages mentioning brand but not linking.
         
-        Strategy:
-        - Search: "brand name" -site:oursite.com
-        - Check if page links to us
-        - If not, create opportunity
+        Uses DataForSEO Backlinks API to get referring domains and
+        checks which ones don't already link to us.
         """
         opportunities = []
         
-        for brand in self.brand_names:
-            # In production, would use Google Custom Search API or similar
-            # For demo, creating sample opportunities
+        # Parse our domain from website_url
+        parsed_url = urlparse(self.website_url)
+        our_domain = parsed_url.netloc or parsed_url.path
+        
+        if not our_domain:
+            logger.warning("Could not parse domain from website_url")
+            return opportunities
+        
+        # Use backlinks client if available
+        if not self.backlinks_client:
+            logger.warning("No backlinks client configured, returning empty list")
+            return opportunities
+        
+        try:
+            # Get referring domains for our domain
+            logger.info(f"Fetching referring domains for: {our_domain}")
+            referring_domains = await self.backlinks_client.get_referring_domains(
+                our_domain, 
+                limit=max_results * 2  # Get more to filter
+            )
             
-            logger.info(f"Searching for unlinked mentions of: {brand}")
+            logger.info(f"Found {len(referring_domains)} referring domains")
             
-            # Placeholder: would make actual API calls
-            sample_mentions = self._generate_sample_mentions(brand, max_results // len(self.brand_names))
-            
-            opportunities.extend(sample_mentions)
+            for domain_data in referring_domains[:max_results]:
+                try:
+                    domain = domain_data.get("domain", "")
+                    if not domain:
+                        continue
+                    
+                    # Check if this domain already links to us
+                    already_links = await self.backlinks_client.check_backlink_exists(
+                        f"https://{domain}",
+                        self.website_url
+                    )
+                    
+                    if not already_links:
+                        # This is an opportunity - they mention us but don't link
+                        import uuid
+                        
+                        opp = BacklinkOpportunity(
+                            opportunity_id=str(uuid.uuid4())[:8],
+                            opportunity_type=OpportunityType.UNLINKED_MENTION,
+                            target_url=f"https://{domain}",
+                            target_domain=domain,
+                            brand_mention=None,  # Would need scraping to get actual mention
+                            suggested_link_url=self.website_url,
+                            domain_authority=domain_data.get("domain_rating", 40),
+                            page_authority=None,
+                            traffic_estimate=domain_data.get("backlinks", 0),
+                            relevance_score=50,  # Default, would need content analysis
+                            outreach_status=OutreachStatus.DISCOVERED
+                        )
+                        
+                        # Check for duplicates before adding
+                        if not self._opportunity_exists(opp.target_url, opp.opportunity_type):
+                            opportunities.append(opp)
+                            
+                            # Persist to database if session available
+                            if self.db:
+                                self._persist_opportunity(opp)
+                                
+                except Exception as e:
+                    logger.warning(f"Error processing domain {domain_data.get('domain', 'unknown')}: {e}")
+                    continue
+                    
+        except Exception as e:
+            logger.error(f"Error fetching unlinked mentions: {e}")
         
         self.opportunities.extend(opportunities)
+        logger.info(f"Found {len(opportunities)} unlinked mention opportunities")
         return opportunities
     
-    def _generate_sample_mentions(self, brand: str, count: int) -> List[BacklinkOpportunity]:
-        """Generate sample unlinked mentions (placeholder)"""
-        import uuid
+    def _opportunity_exists(self, target_url: str, opportunity_type: OpportunityType) -> bool:
+        """Check if an opportunity already exists in memory or database."""
+        # Check in-memory opportunities
+        for opp in self.opportunities:
+            if opp.target_url == target_url and opp.opportunity_type == opportunity_type:
+                return True
         
-        opportunities = []
+        # Check database if session available
+        if self.db:
+            try:
+                from src.models.backlink import BacklinkOpportunityModel
+                existing = self.db.query(BacklinkOpportunityModel).filter(
+                    BacklinkOpportunityModel.target_url == target_url,
+                    BacklinkOpportunityModel.opportunity_type == opportunity_type
+                ).first()
+                return existing is not None
+            except Exception as e:
+                logger.debug(f"Could not check database for duplicates: {e}")
         
-        for i in range(min(count, 5)):  # Limit to 5 samples
-            opp = BacklinkOpportunity(
-                opportunity_id=str(uuid.uuid4())[:8],
-                opportunity_type=OpportunityType.UNLINKED_MENTION,
-                target_url=f"https://example-blog-{i}.com/article-about-{brand.lower().replace(' ', '-')}",
-                target_domain=f"example-blog-{i}.com",
-                brand_mention=f"We recently tested {brand} and found it effective",
-                suggested_link_url=self.website_url,
-                domain_authority=40 + i * 5,
-                relevance_score=60 + i * 5,
-                outreach_status=OutreachStatus.DISCOVERED
+        return False
+    
+    def _persist_opportunity(self, opp: BacklinkOpportunity) -> None:
+        """Persist an opportunity to the database."""
+        if not self.db:
+            return
+            
+        try:
+            from src.models.backlink import BacklinkOpportunityModel
+            
+            # Check again for duplicates
+            existing = self.db.query(BacklinkOpportunityModel).filter(
+                BacklinkOpportunityModel.target_url == opp.target_url,
+                BacklinkOpportunityModel.opportunity_type == opp.opportunity_type
+            ).first()
+            
+            if existing:
+                logger.debug(f"Opportunity already exists: {opp.target_url}")
+                return
+            
+            # Create new record
+            db_opp = BacklinkOpportunityModel(
+                target_url=opp.target_url,
+                target_domain=opp.target_domain,
+                opportunity_type=opp.opportunity_type,
+                domain_authority=opp.domain_authority,
+                page_authority=opp.page_authority,
+                traffic_estimate=opp.traffic_estimate,
+                relevance_score=opp.relevance_score,
+                contact_email=opp.contact_email,
+                contact_name=opp.contact_name,
+                outreach_status=opp.outreach_status,
+                brand_mention=opp.brand_mention,
+                anchor_text_suggestion=opp.anchor_text_suggestion,
+                suggested_link_url=opp.suggested_link_url,
+                notes=opp.notes,
+                discovered_at=opp.discovered_at
             )
-            opportunities.append(opp)
-        
-        return opportunities
+            
+            self.db.add(db_opp)
+            self.db.commit()
+            logger.debug(f"Persisted opportunity: {opp.target_url}")
+            
+        except Exception as e:
+            logger.error(f"Error persisting opportunity: {e}")
+            if self.db:
+                self.db.rollback()
     
     async def find_resource_pages(
         self,
@@ -152,52 +264,102 @@ class BacklinkDiscoveryEngine:
         max_results: int = 30
     ) -> List[BacklinkOpportunity]:
         """
-        Find resource/listicle pages in niche
+        Find resource/listicle pages in niche using competitor backlink analysis.
         
-        Search patterns:
-        - "keyword + resources"
-        - "keyword + links"
-        - "best keyword tools"
+        Strategy:
+        - Get backlinks for competitor domains
+        - Filter for resource/listicle pages
+        - Check if they don't already link to us
         """
         opportunities = []
         
-        for keyword in keywords:
-            search_queries = [
-                f"{keyword} resources",
-                f"{keyword} tools list",
-                f"best {keyword} websites"
-            ]
+        if not self.backlinks_client:
+            logger.warning("No backlinks client configured, returning empty list")
+            return opportunities
+        
+        # Parse our domain
+        parsed_url = urlparse(self.website_url)
+        our_domain = parsed_url.netloc or parsed_url.path
+        
+        if not our_domain:
+            logger.warning("Could not parse domain from website_url")
+            return opportunities
+        
+        try:
+            results_per_keyword = max(1, max_results // len(keywords)) if keywords else max_results
             
-            for query in search_queries:
-                logger.info(f"Searching for resource pages: {query}")
+            for keyword in keywords[:5]:  # Limit to first 5 keywords
+                logger.info(f"Finding resource pages for keyword: {keyword}")
                 
-                # Placeholder: would make actual searches
-                sample_resources = self._generate_sample_resource_pages(keyword, max_results // len(keywords) // len(search_queries))
-                opportunities.extend(sample_resources)
+                # Use keyword to find potential resource pages
+                # In a real implementation, we might search for:
+                # - "keyword resources"
+                # - "best keyword tools"
+                # For now, we get backlinks to related domains
+                
+                # This is a simplified approach - get backlinks to our own domain
+                # and look for patterns that suggest resource pages
+                backlinks = await self.backlinks_client.get_backlinks_for_domain(
+                    our_domain,
+                    limit=results_per_keyword * 2
+                )
+                
+                for backlink_data in backlinks[:results_per_keyword]:
+                    try:
+                        source_url = backlink_data.get("url", "")
+                        if not source_url:
+                            continue
+                        
+                        parsed_source = urlparse(source_url)
+                        source_domain = parsed_source.netloc
+                        
+                        if not source_domain:
+                            continue
+                        
+                        # Check if URL pattern suggests a resource page
+                        path_lower = parsed_source.path.lower()
+                        is_resource_page = any(pattern in path_lower for pattern in [
+                            "resource", "tool", "list", "guide", "best", "top",
+                            "comparison", "review", "alternative"
+                        ])
+                        
+                        if not is_resource_page:
+                            continue
+                        
+                        # Check if we already have this opportunity
+                        import uuid
+                        
+                        opp = BacklinkOpportunity(
+                            opportunity_id=str(uuid.uuid4())[:8],
+                            opportunity_type=OpportunityType.RESOURCE_PAGE,
+                            target_url=source_url,
+                            target_domain=source_domain,
+                            suggested_link_url=self.website_url,
+                            anchor_text_suggestion=f"Best {keyword} resources",
+                            domain_authority=backlink_data.get("domain_rating", 50),
+                            page_authority=backlink_data.get("page_rating"),
+                            traffic_estimate=backlink_data.get("backlinks", 0),
+                            relevance_score=70 if is_resource_page else 50,
+                            outreach_status=OutreachStatus.DISCOVERED
+                        )
+                        
+                        # Check for duplicates
+                        if not self._opportunity_exists(opp.target_url, opp.opportunity_type):
+                            opportunities.append(opp)
+                            
+                            # Persist to database
+                            if self.db:
+                                self._persist_opportunity(opp)
+                                
+                    except Exception as e:
+                        logger.warning(f"Error processing backlink: {e}")
+                        continue
+                        
+        except Exception as e:
+            logger.error(f"Error finding resource pages: {e}")
         
         self.opportunities.extend(opportunities)
-        return opportunities
-    
-    def _generate_sample_resource_pages(self, keyword: str, count: int) -> List[BacklinkOpportunity]:
-        """Generate sample resource pages (placeholder)"""
-        import uuid
-        
-        opportunities = []
-        
-        for i in range(min(count, 3)):
-            opp = BacklinkOpportunity(
-                opportunity_id=str(uuid.uuid4())[:8],
-                opportunity_type=OpportunityType.RESOURCE_PAGE,
-                target_url=f"https://resource-site-{i}.com/best-{keyword.replace(' ', '-')}-tools",
-                target_domain=f"resource-site-{i}.com",
-                suggested_link_url=self.website_url,
-                anchor_text_suggestion=f"Best {keyword} Solution",
-                domain_authority=50 + i * 5,
-                relevance_score=70 + i * 5,
-                outreach_status=OutreachStatus.DISCOVERED
-            )
-            opportunities.append(opp)
-        
+        logger.info(f"Found {len(opportunities)} resource page opportunities")
         return opportunities
     
     def score_opportunity(self, opp: BacklinkOpportunity) -> float:

@@ -12,7 +12,7 @@ Features:
 
 import logging
 from typing import List, Dict, Any, Set, Optional
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 
 logger = logging.getLogger(__name__)
@@ -43,6 +43,9 @@ class KeywordCandidate:
     difficulty_estimate: str  # low, medium, high
     is_long_tail: bool
     semantic_group: str  # For avoiding cannibalization
+    # Real data from API (optional, populated when API is available)
+    search_volume: Optional[int] = None
+    difficulty_score: Optional[int] = None  # 0-100 numeric score
 
 
 class ContentAwareKeywordGenerator:
@@ -110,8 +113,100 @@ class ContentAwareKeywordGenerator:
             stage_keywords = self._generate_stage_keywords(stage, stage_limit, intent_mix)
             keywords.extend(stage_keywords)
 
+        # Enrich with real search volume data from API
+        keywords = self._enrich_with_api_data(keywords)
+
+        # Sort by search volume (descending) if available
+        keywords.sort(key=lambda k: (k.search_volume or 0), reverse=True)
+
         logger.info(f"Generated {len(keywords)} content-aware keywords")
         return keywords[:limit]
+
+    def _enrich_with_api_data(self, keywords: List[KeywordCandidate]) -> List[KeywordCandidate]:
+        """
+        Enrich keywords with real search volume and difficulty data from API.
+        Falls back to estimates if API is unavailable.
+        """
+        try:
+            # Import here to avoid circular dependencies
+            import asyncio
+            from src.integrations.keyword_client import KeywordClient
+
+            client = KeywordClient(provider='dataforseo')
+
+            # Check if API credentials are configured
+            if not client.api_key:
+                logger.debug("No API key configured, skipping enrichment")
+                return keywords
+
+            # Get unique keywords to query
+            unique_keywords = list({k.keyword for k in keywords})
+
+            # Query API for first keyword to get suggestions (limit API calls)
+            if unique_keywords:
+                try:
+                    # Run async call in sync context
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+
+                    # Get keyword suggestions for the first seed keyword
+                    opportunities = loop.run_until_complete(
+                        client.get_keyword_suggestions(unique_keywords[0], limit=min(len(unique_keywords), 50))
+                    )
+                    loop.close()
+
+                    # Create lookup map
+                    api_data = {opp.keyword.lower(): opp for opp in opportunities}
+
+                    # Enrich keywords with API data
+                    for kw in keywords:
+                        keyword_lower = kw.keyword.lower()
+                        if keyword_lower in api_data:
+                            opp = api_data[keyword_lower]
+                            kw.search_volume = opp.volume
+                            kw.difficulty_score = opp.difficulty
+                            # Update difficulty estimate based on numeric score
+                            if opp.difficulty < 30:
+                                kw.difficulty_estimate = "low"
+                            elif opp.difficulty < 60:
+                                kw.difficulty_estimate = "medium"
+                            else:
+                                kw.difficulty_estimate = "high"
+                        else:
+                            # Map difficulty_estimate to numeric score as fallback
+                            kw.difficulty_score = self._estimate_to_score(kw.difficulty_estimate)
+
+                except Exception as e:
+                    logger.warning(f"Could not enrich keywords with API data: {e}")
+                    # Fallback: map estimates to scores
+                    for kw in keywords:
+                        kw.difficulty_score = self._estimate_to_score(kw.difficulty_estimate)
+            else:
+                # No keywords to enrich, just map estimates
+                for kw in keywords:
+                    kw.difficulty_score = self._estimate_to_score(kw.difficulty_estimate)
+
+        except ImportError as e:
+            logger.debug(f"Could not import KeywordClient: {e}")
+            # Fallback: map estimates to scores
+            for kw in keywords:
+                kw.difficulty_score = self._estimate_to_score(kw.difficulty_estimate)
+        except Exception as e:
+            logger.warning(f"Error enriching keywords: {e}")
+            # Fallback: map estimates to scores
+            for kw in keywords:
+                kw.difficulty_score = self._estimate_to_score(kw.difficulty_estimate)
+
+        return keywords
+
+    def _estimate_to_score(self, estimate: str) -> int:
+        """Convert difficulty estimate string to numeric score."""
+        mapping = {
+            "low": 25,
+            "medium": 50,
+            "high": 75
+        }
+        return mapping.get(estimate.lower(), 50)
 
     def _generate_stage_keywords(
         self,

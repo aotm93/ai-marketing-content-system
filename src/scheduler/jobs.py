@@ -1152,6 +1152,7 @@ async def cannibalization_analysis_job(data: Dict[str, Any]) -> Dict[str, Any]:
 
 
 # Job registry for easy registration with autopilot
+# Note: Traffic acquisition jobs are registered at end of file after function definitions
 JOB_REGISTRY = {
     "content_generation": content_generation_job,
     "seo_optimization": seo_optimization_job,
@@ -1224,3 +1225,213 @@ INDEX_CHECK_JOB = {
     "id": "index_status_check",
     "replace_existing": True
 }
+
+
+# ==================== Traffic Acquisition Jobs (Wave 3) ====================
+
+async def weekly_backlink_scan_job():
+    """
+    Weekly job to scan for new backlink opportunities.
+    
+    Runs automatically to:
+    1. Use BacklinkDiscoveryEngine to find unlinked mentions
+    2. Use BacklinkDiscoveryEngine to find resource pages
+    3. Persist new opportunities to database
+    """
+    from src.backlink.copilot import BacklinkDiscoveryEngine
+    from src.integrations.dataforseo_backlinks import DataForSEOBacklinksClient
+    from src.core.database import get_db
+    from src.config import settings
+    
+    logger.info("Starting weekly backlink scan...")
+    
+    try:
+        db = next(get_db())
+        
+        # Initialize client and engine
+        client = DataForSEOBacklinksClient()
+        engine = BacklinkDiscoveryEngine(
+            brand_names=[settings.wordpress_url or "example.com"],
+            website_url=settings.wordpress_url or "https://example.com",
+            backlinks_client=client,
+            db_session=db
+        )
+        
+        # Find unlinked mentions
+        mentions = await engine.find_unlinked_mentions(max_results=50)
+        logger.info(f"Found {len(mentions)} unlinked mention opportunities")
+        
+        # Find resource pages
+        # Get keywords from existing content or use defaults
+        keywords = ["resources", "tools", "guides"]
+        resources = await engine.find_resource_pages(keywords=keywords, max_results=30)
+        logger.info(f"Found {len(resources)} resource page opportunities")
+        
+        total_opportunities = len(mentions) + len(resources)
+        logger.info(f"Weekly backlink scan completed: {total_opportunities} total opportunities")
+        
+        return {
+            "mentions_found": len(mentions),
+            "resources_found": len(resources),
+            "total": total_opportunities
+        }
+        
+    except Exception as e:
+        logger.error(f"Weekly backlink scan failed: {e}")
+        return {"error": str(e)}
+    finally:
+        db.close()
+
+
+async def hourly_email_sequence_processor_job():
+    """
+    Hourly job to process pending email sequence steps.
+    
+    Runs automatically to:
+    1. Check for enrollments ready for next step
+    2. Send emails via Resend
+    3. Update enrollment progress
+    """
+    from src.email.sequence_engine import SequenceEngine
+    from src.email.resend_client import ResendClient
+    from src.core.database import get_db
+    
+    logger.info("Starting hourly email sequence processing...")
+    
+    try:
+        db = next(get_db())
+        
+        # Initialize engine
+        client = ResendClient()
+        engine = SequenceEngine(db=db, resend_client=client)
+        
+        # Process pending steps
+        stats = await engine.process_pending_steps()
+        
+        logger.info(
+            f"Email sequence processing completed: "
+            f"{stats.get('sent', 0)} sent, "
+            f"{stats.get('failed', 0)} failed, "
+            f"{stats.get('completed', 0)} completed"
+        )
+        
+        return stats
+        
+    except Exception as e:
+        logger.error(f"Hourly email sequence processing failed: {e}")
+        return {"error": str(e)}
+    finally:
+        db.close()
+
+
+async def weekly_keyword_refresh_job():
+    """
+    Weekly job to refresh keyword pool with real API data.
+    
+    Runs automatically to:
+    1. Generate new keywords using ContentAwareKeywordGenerator
+    2. Enrich with DataForSEO API data
+    3. Store/update keywords in database
+    """
+    from src.services.keyword_strategy import ContentAwareKeywordGenerator
+    from src.integrations.keyword_client import KeywordClient
+    from src.models.keyword import Keyword
+    from src.core.database import get_db
+    
+    logger.info("Starting weekly keyword refresh...")
+    
+    try:
+        db = next(get_db())
+        
+        # Generate keywords
+        generator = ContentAwareKeywordGenerator()
+        candidates = generator.generate_keyword_pool(limit=100)
+        
+        created_count = 0
+        updated_count = 0
+        
+        for candidate in candidates:
+            try:
+                # Check if keyword exists
+                existing = db.query(Keyword).filter(Keyword.keyword == candidate.keyword).first()
+                
+                if existing:
+                    # Update with new data
+                    if candidate.search_volume is not None:
+                        existing.search_volume = candidate.search_volume
+                    if candidate.difficulty_score is not None:
+                        existing.difficulty = candidate.difficulty_score
+                    updated_count += 1
+                else:
+                    # Create new keyword
+                    new_keyword = Keyword(
+                        keyword=candidate.keyword,
+                        category=candidate.category,
+                        intent=candidate.intent.value,
+                        search_volume=candidate.search_volume,
+                        difficulty=candidate.difficulty_score,
+                        priority="medium"
+                    )
+                    db.add(new_keyword)
+                    created_count += 1
+                    
+            except Exception as e:
+                logger.warning(f"Error processing keyword {candidate.keyword}: {e}")
+                continue
+        
+        db.commit()
+        
+        logger.info(
+            f"Weekly keyword refresh completed: "
+            f"{created_count} created, {updated_count} updated"
+        )
+        
+        return {
+            "created": created_count,
+            "updated": updated_count,
+            "total_processed": len(candidates)
+        }
+        
+    except Exception as e:
+        logger.error(f"Weekly keyword refresh failed: {e}")
+        db.rollback()
+        return {"error": str(e)}
+    finally:
+        db.close()
+
+
+# Register traffic acquisition jobs with cron schedules
+BACKLINK_SCAN_JOB = {
+    "func": weekly_backlink_scan_job,
+    "trigger": "cron",
+    "day_of_week": "sun",  # Run on Sunday
+    "hour": 3,
+    "minute": 0,
+    "id": "weekly_backlink_scan",
+    "replace_existing": True
+}
+
+EMAIL_SEQUENCE_JOB = {
+    "func": hourly_email_sequence_processor_job,
+    "trigger": "cron",
+    "hour": "*",  # Run every hour
+    "minute": 0,
+    "id": "hourly_email_sequence_processor",
+    "replace_existing": True
+}
+
+KEYWORD_REFRESH_JOB = {
+    "func": weekly_keyword_refresh_job,
+    "trigger": "cron",
+    "day_of_week": "mon",  # Run on Monday
+    "hour": 4,
+    "minute": 0,
+    "id": "weekly_keyword_refresh",
+    "replace_existing": True
+}
+
+
+# Register traffic acquisition jobs in JOB_REGISTRY (must be after function definitions)
+JOB_REGISTRY["weekly_backlink_scan"] = weekly_backlink_scan_job
+JOB_REGISTRY["hourly_email_sequence_processor"] = hourly_email_sequence_processor_job
+JOB_REGISTRY["weekly_keyword_refresh"] = weekly_keyword_refresh_job
