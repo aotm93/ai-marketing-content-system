@@ -17,6 +17,7 @@ from src.api.cannibalization import router as cannibalization_router
 from src.api.job_logs import router as job_logs_router
 from src.api.keywords import router as keyword_router
 from src.api.email import router as email_router
+from src.api.content_intelligence import router as content_intelligence_router
 from src.config.utils import load_settings_from_db, init_system_config
 from src.core.database import SessionLocal
 
@@ -194,6 +195,7 @@ app.include_router(cannibalization_router)
 app.include_router(job_logs_router)
 app.include_router(keyword_router)
 app.include_router(email_router)
+app.include_router(content_intelligence_router)
 
 # CORS middleware
 app.add_middleware(

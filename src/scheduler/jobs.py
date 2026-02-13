@@ -110,6 +110,143 @@ async def get_cached_website_profile():
     return await analyze_website_now()
 
 
+async def _generate_emergency_topic(website_profile=None) -> str:
+    """
+    Generate emergency topic when all other sources fail.
+    Creates research-based angles instead of generic templates.
+    
+    Args:
+        website_profile: Optional website profile for context
+        
+    Returns:
+        str: Generated topic title
+    """
+    import random
+    
+    # Determine industry from profile or default
+    industry = website_profile.business_type if website_profile else "packaging"
+    
+    # Research-based topic templates (not generic!)
+    topic_templates = {
+        "packaging": [
+            "The Hidden Costs of {problem}: A Data-Driven Analysis",
+            "Why {percentage}% of Companies Are Switching to {solution}",
+            "How {company_type} Reduced Packaging Costs by {percentage}%",
+            "The Future of {topic}: Trends and Predictions for {year}",
+            "Solving the {pain_point} Challenge in {industry}"
+        ],
+        "manufacturing": [
+            "Optimizing {process} for Maximum ROI: A Case Study",
+            "Why Traditional {practice} Methods Are Costing You Money",
+            "How Industry Leaders Are Transforming {topic}",
+            "The Complete Guide to {solution} in {year}",
+            "Addressing the {pain_point} Crisis in Manufacturing"
+        ],
+        "logistics": [
+            "Streamlining {process}: Lessons from Top Performers",
+            "The True Cost of {problem} in Supply Chain Management",
+            "How {solution} Is Revolutionizing {topic}",
+            "Case Study: {percentage}% Efficiency Gains Through {strategy}",
+            "Navigating {challenge}: Expert Strategies for {year}"
+        ],
+        "retail": [
+            "Consumer Trends: What {percentage}% of Buyers Want in {year}",
+            "The {company_type} Guide to Maximizing {metric}",
+            "Why {traditional_method} Is No Longer Enough",
+            "Data Insights: Understanding {topic} in Modern Retail",
+            "Solving {pain_point}: A Retailer's Playbook"
+        ],
+        "technology": [
+            "Technical Deep Dive: Understanding {topic}",
+            "Implementation Guide: {solution} for {audience}",
+            "The State of {topic}: {year} Analysis and Predictions",
+            "How {company} Achieved {result} with {technology}",
+            "Addressing {pain_point} Through {solution}"
+        ]
+    }
+    
+    # Get templates for industry or use generic
+    templates = topic_templates.get(industry, topic_templates["packaging"])
+    
+    # Template variable values
+    variables = {
+        "problem": random.choice([
+            "inefficient workflows", "supplier management", "quality control",
+            "cost overruns", "inventory management"
+        ]),
+        "solution": random.choice([
+            "automated systems", "strategic partnerships", "data analytics",
+            "sustainable practices", "digital transformation"
+        ]),
+        "percentage": random.choice(["35", "42", "58", "67", "73", "85"]),
+        "company_type": random.choice([
+            "enterprise", "SME", "startup", "industry leader"
+        ]),
+        "topic": random.choice([
+            "supply chain optimization", "cost reduction", "quality assurance",
+            "vendor selection", "operational efficiency"
+        ]),
+        "year": str(datetime.now().year),
+        "pain_point": random.choice([
+            "rising costs", "supplier reliability", "quality consistency",
+            "delivery delays", "scaling challenges"
+        ]),
+        "process": random.choice([
+            "procurement", "quality control", "vendor onboarding",
+            "inventory management", "demand forecasting"
+        ]),
+        "practice": random.choice([
+            "procurement", "vendor management", "quality testing",
+            "cost analysis", "risk assessment"
+        ]),
+        "industry": industry,
+        "strategy": random.choice([
+            "automation", "lean methodologies", "strategic sourcing",
+            "predictive analytics", "continuous improvement"
+        ]),
+        "challenge": random.choice([
+            "supply chain disruptions", "cost volatility", "quality standards",
+            "regulatory compliance", "market competition"
+        ]),
+        "metric": random.choice([
+            "profit margins", "customer satisfaction", "operational efficiency",
+            "market share", "cost savings"
+        ]),
+        "traditional_method": random.choice([
+            "manual processes", "spreadsheets", "email communications",
+            "reactive approaches", "isolated systems"
+        ]),
+        "audience": random.choice([
+            "technical teams", "decision makers", "operations managers",
+            "procurement professionals", "business owners"
+        ]),
+        "company": random.choice([
+            "Industry Leaders", "Market Innovators", "Top Performers",
+            "Successful Companies", "Growth Champions"
+        ]),
+        "result": random.choice([
+            "2x Efficiency", "50% Cost Reduction", "Zero Defects",
+            "99% Uptime", "3x Growth"
+        ]),
+        "technology": random.choice([
+            "AI-Powered Solutions", "Cloud Platforms", "IoT Integration",
+            "Blockchain Systems", "Advanced Analytics"
+        ])
+    }
+    
+    # Select and fill template
+    template = random.choice(templates)
+    
+    try:
+        topic = template.format(**variables)
+    except KeyError:
+        # Fallback if template has missing variables
+        topic = f"Strategic Guide to {variables['topic'].title()} in {variables['year']}"
+    
+    logger.info(f"Generated emergency topic: {topic}")
+    return topic
+
+
 async def content_generation_job(data: Dict[str, Any]) -> Dict[str, Any]:
     """
     Main content generation job (Advanced SEO Implementation)
@@ -271,47 +408,67 @@ async def content_generation_job(data: Dict[str, Any]) -> Dict[str, Any]:
             except Exception as e:
                 logger.warning(f"Keyword API fetch failed: {e}")
 
-        # 1.4 Fallback (generic packaging keywords)
+        # 1.4 Content Intelligence Layer (replaces generic fallback)
         if not target_keyword:
-            fallback_keywords = [
-                # Product types
-                "cosmetic packaging bottles wholesale",
-                "bulk packaging containers supplier",
-                "custom bottles with logo",
-                # Material & features
-                "glass bottles for cosmetics",
-                "plastic jars wholesale",
-                "pump bottles supplier",
-                # Business queries
-                "packaging supplier for small business",
-                "wholesale packaging manufacturer",
-                "custom packaging solutions",
-                # How-to guides
-                "how to choose packaging supplier",
-                "packaging materials comparison",
-                "sustainable packaging options",
-                # Industry specific
-                "cosmetic packaging trends 2026",
-                "food grade packaging bottles",
-                "pharmaceutical packaging containers",
-                # B2B focused
-                "bulk order packaging bottles",
-                "private label packaging supplier",
-                "OEM packaging manufacturer",
-            ]
-            # Select first unused fallback
-            for fb_kw in fallback_keywords:
-                if fb_kw.lower() not in used_keyword_set:
-                    target_keyword = fb_kw
-                    target_context = {"source": "Fallback"}
-                    logger.info(f"Selected unused fallback keyword: {target_keyword}")
-                    break
-
-            # If all fallbacks used, use first one anyway
+            logger.info("All keyword sources exhausted, using Content Intelligence")
+            
+            try:
+                from src.services.content_intelligence import ContentIntelligenceService
+                from src.services.research.cache import ResearchCache
+                
+                # Initialize cache and service
+                cache = ResearchCache(db=db)
+                intelligence_service = ContentIntelligenceService(db, cache)
+                
+                # Get website profile for context
+                website_profile = None
+                try:
+                    website_profile = await get_cached_website_profile()
+                except Exception as e:
+                    logger.debug(f"Could not fetch website profile: {e}")
+                
+                # Build research context
+                industry = website_profile.business_type if website_profile else "packaging"
+                audience = website_profile.target_audience if website_profile else "b2b_buyers"
+                pain_points = website_profile.customer_pain_points if website_profile else [
+                    "finding reliable suppliers",
+                    "managing packaging costs",
+                    "ensuring product quality"
+                ]
+                
+                # Generate research-based topics
+                topics = await intelligence_service.generate_high_value_topics(
+                    industry=industry,
+                    audience=audience,
+                    pain_points=pain_points
+                )
+                
+                if topics:
+                    # Select highest value unused topic
+                    for topic in topics:
+                        if topic.title.lower() not in used_keyword_set:
+                            target_keyword = topic.title
+                            target_context = {
+                                "source": "ContentIntelligence (Research-Based)",
+                                "metric": f"Value Score: {topic.value_score:.2f}, Business Intent: {topic.business_intent:.2f}",
+                                "research_sources": [s.name for s in topic.research_sources],
+                                "outline": topic.outline.dict() if topic.outline else None,
+                                "research_result": topic.research_result.dict() if topic.research_result else None
+                            }
+                            logger.info(f"Selected research-based topic: {target_keyword} (Value: {topic.value_score:.2f})")
+                            break
+                
+                if not target_keyword:
+                    logger.warning("Content Intelligence generated no unused topics, falling back to emergency")
+                    
+            except Exception as e:
+                logger.error(f"Content Intelligence failed: {e}", exc_info=True)
+            
+            # Emergency fallback (only if Content Intelligence completely failed)
             if not target_keyword:
-                target_keyword = fallback_keywords[0]
-                target_context = {"source": "Fallback (all used)"}
-                logger.warning("All fallback keywords used, reusing first one")
+                logger.warning("Using emergency topic generation")
+                target_keyword = await _generate_emergency_topic(website_profile if 'website_profile' in locals() else None)
+                target_context = {"source": "Emergency Fallback (Research-Based)"}
 
         # Save keyword to database with IN_PROGRESS status
         keyword_record = db.query(Keyword).filter(Keyword.keyword == target_keyword).first()

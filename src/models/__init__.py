@@ -8,6 +8,7 @@ from .backlink import BacklinkOpportunityModel
 from .email import EmailSubscriber
 from .email_sequence import EmailSequence, EmailSequenceStep
 from .email_enrollment import EmailEnrollment
+from .content_intelligence import ContentTopicModel, ResearchCacheEntry, APICallLog
 
 __all__ = [
     "Base",
@@ -27,4 +28,7 @@ __all__ = [
     "EmailSequence",
     "EmailSequenceStep",
     "EmailEnrollment",
+    "ContentTopicModel",
+    "ResearchCacheEntry",
+    "APICallLog",
 ]
