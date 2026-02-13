@@ -307,6 +307,11 @@ async def content_generation_job(data: Dict[str, Any]) -> Dict[str, Any]:
 
         logger.info(f"Found {len(used_keyword_set)} total used keywords, {len(today_keyword_list)} used today")
 
+        # Initialize SEOContext for unified SEO element management
+        # This will be populated regardless of which keyword source succeeds
+        seo_context = None
+        selected_topic = None
+        
         # 1.1 Try GSC (Optimization)
         try:
             from src.integrations.gsc_client import GSCClient
@@ -326,6 +331,19 @@ async def content_generation_job(data: Dict[str, Any]) -> Dict[str, Any]:
                             "metric": f"Pos: {opp.position}, Impr: {opp.impressions}"
                         }
                         logger.info(f"Selected unused GSC keyword: {target_keyword}")
+                        
+                        # Create SEOContext for GSC keyword
+                        from src.models.seo_context import SEOContext, SEOElementStatus
+                        from src.models.content_intelligence import HookType
+                        seo_context = SEOContext(
+                            content_id=f"gsc_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{target_keyword[:30]}",
+                            source="GSC",
+                            target_keyword=target_keyword,
+                            topic_title=target_keyword,
+                            selected_title=target_keyword,
+                            title_hook_type=HookType.HOW_TO,
+                            status=SEOElementStatus.GENERATED
+                        )
                         break
         except Exception as e:
             logger.warning(f"GSC fetch failed: {e}")
@@ -377,6 +395,22 @@ async def content_generation_job(data: Dict[str, Any]) -> Dict[str, Any]:
                         "metric": f"Stage: {selected.journey_stage.value}, Intent: {selected.intent.value}"
                     }
                     logger.info(f"Selected content-aware keyword: {target_keyword} (Stage: {selected.journey_stage.value})")
+                    
+                    # Create SEOContext for Content-Aware keyword
+                    if not seo_context:
+                        from src.models.seo_context import SEOContext, SEOElementStatus
+                        from src.models.content_intelligence import HookType
+                        seo_context = SEOContext(
+                            content_id=f"ca_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{target_keyword[:30]}",
+                            source="ContentAware",
+                            industry=website_profile.business_type if website_profile else "general",
+                            target_audience=website_profile.target_audience if website_profile else "b2b",
+                            target_keyword=target_keyword,
+                            topic_title=target_keyword,
+                            selected_title=target_keyword,
+                            title_hook_type=HookType.HOW_TO,
+                            status=SEOElementStatus.GENERATED
+                        )
             except Exception as e:
                 logger.warning(f"Content-aware keyword generation failed: {e}")
 
@@ -404,14 +438,27 @@ async def content_generation_job(data: Dict[str, Any]) -> Dict[str, Any]:
                             "metric": f"Vol: {kw.volume}, KD: {kw.difficulty}"
                         }
                         logger.info(f"Selected unused Keyword API keyword: {target_keyword}")
+                        
+                        # Create SEOContext for Keyword API keyword
+                        if not seo_context:
+                            from src.models.seo_context import SEOContext, SEOElementStatus
+                            from src.models.content_intelligence import HookType
+                            seo_context = SEOContext(
+                                content_id=f"api_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{target_keyword[:30]}",
+                                source="KeywordAPI",
+                                target_keyword=target_keyword,
+                                topic_title=target_keyword,
+                                selected_title=target_keyword,
+                                title_hook_type=HookType.HOW_TO,
+                                status=SEOElementStatus.GENERATED
+                            )
                         break
             except Exception as e:
                 logger.warning(f"Keyword API fetch failed: {e}")
 
         # 1.4 Content Intelligence Layer (replaces generic fallback)
-        # Initialize SEOContext for unified SEO element management
-        seo_context = None
-        selected_topic = None
+        # SEOContext is already initialized at the beginning of keyword selection
+        # It will be populated if CI layer is used, otherwise basic context was created by earlier sources
         
         if not target_keyword:
             logger.info("All keyword sources exhausted, using Content Intelligence")

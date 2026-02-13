@@ -144,8 +144,21 @@ class ContentAwareKeywordGenerator:
 
             # Query API for first keyword to get suggestions (limit API calls)
             if unique_keywords:
+                # Check if we're already in an event loop
                 try:
-                    # Run async call in sync context
+                    loop = asyncio.get_running_loop()
+                    # If we get here, we're in an async context - can't nest loops
+                    logger.debug("Already in event loop, using estimate-based enrichment to avoid loop nesting")
+                    # Skip API call and use estimates
+                    for kw in keywords:
+                        kw.difficulty_score = self._estimate_to_score(kw.difficulty_estimate)
+                    return keywords
+                except RuntimeError:
+                    # No loop running, safe to create one and make API call
+                    pass
+                
+                try:
+                    # Run async call in sync context (only if no loop is running)
                     loop = asyncio.new_event_loop()
                     asyncio.set_event_loop(loop)
 
