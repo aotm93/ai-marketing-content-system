@@ -9,6 +9,7 @@ from .email import EmailSubscriber
 from .email_sequence import EmailSequence, EmailSequenceStep
 from .email_enrollment import EmailEnrollment
 from .content_intelligence import ContentTopicModel, ResearchCacheEntry, APICallLog
+from .seo_context import SEOContext, InternalLinkOpportunity, SEOElementStatus
 
 __all__ = [
     "Base",
@@ -31,4 +32,7 @@ __all__ = [
     "ContentTopicModel",
     "ResearchCacheEntry",
     "APICallLog",
+    "SEOContext",
+    "InternalLinkOpportunity",
+    "SEOElementStatus",
 ]

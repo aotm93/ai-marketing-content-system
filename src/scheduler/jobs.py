@@ -409,16 +409,23 @@ async def content_generation_job(data: Dict[str, Any]) -> Dict[str, Any]:
                 logger.warning(f"Keyword API fetch failed: {e}")
 
         # 1.4 Content Intelligence Layer (replaces generic fallback)
+        # Initialize SEOContext for unified SEO element management
+        seo_context = None
+        selected_topic = None
+        
         if not target_keyword:
             logger.info("All keyword sources exhausted, using Content Intelligence")
             
             try:
                 from src.services.content_intelligence import ContentIntelligenceService
                 from src.services.research.cache import ResearchCache
+                from src.services.content.hook_optimizer import HookOptimizer
+                from src.models.seo_context import SEOContext, SEOElementStatus
                 
                 # Initialize cache and service
                 cache = ResearchCache(db=db)
                 intelligence_service = ContentIntelligenceService(db, cache)
+                hook_optimizer = HookOptimizer()
                 
                 # Get website profile for context
                 website_profile = None
@@ -447,15 +454,50 @@ async def content_generation_job(data: Dict[str, Any]) -> Dict[str, Any]:
                     # Select highest value unused topic
                     for topic in topics:
                         if topic.title.lower() not in used_keyword_set:
+                            selected_topic = topic
                             target_keyword = topic.title
+                            
+                            # Generate optimized title variants using HookOptimizer
+                            logger.info(f"Generating optimized title variants for: {topic.title}")
+                            optimized_titles = await hook_optimizer.generate_optimized_titles(topic, count=5)
+                            
+                            # Select best title based on CTR strategy
+                            best_title = await hook_optimizer.select_best_title(optimized_titles, strategy="balanced")
+                            
+                            # Create unified SEOContext
+                            seo_context = SEOContext(
+                                content_id=f"ci_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{topic.title[:30]}",
+                                source="ContentIntelligence",
+                                industry=industry,
+                                target_audience=audience,
+                                target_keyword=topic.title,  # Use topic title as focus keyword
+                                topic_title=topic.title,
+                                optimized_titles=optimized_titles,
+                                selected_title=best_title.title,
+                                selected_title_variant=best_title.test_variant,
+                                title_hook_type=best_title.hook_type,
+                                title_ctr_estimate=best_title.expected_ctr,
+                                research_result=topic.research_result,
+                                outline=topic.outline,
+                                value_score=topic.value_score,
+                                business_intent=topic.business_intent,
+                                status=SEOElementStatus.GENERATED
+                            )
+                            
                             target_context = {
                                 "source": "ContentIntelligence (Research-Based)",
                                 "metric": f"Value Score: {topic.value_score:.2f}, Business Intent: {topic.business_intent:.2f}",
                                 "research_sources": [s.name for s in topic.research_sources],
+                                "selected_title": best_title.title,
+                                "title_variant": best_title.test_variant,
+                                "hook_type": best_title.hook_type.value,
+                                "ctr_estimate": best_title.expected_ctr,
                                 "outline": topic.outline.dict() if topic.outline else None,
-                                "research_result": topic.research_result.dict() if topic.research_result else None
+                                "research_result": topic.research_result.dict() if topic.research_result else None,
+                                "optimized_titles_count": len(optimized_titles)
                             }
-                            logger.info(f"Selected research-based topic: {target_keyword} (Value: {topic.value_score:.2f})")
+                            logger.info(f"Selected research-based topic: {target_keyword}")
+                            logger.info(f"Optimized title: {best_title.title} (CTR: {best_title.expected_ctr:.3f}, Hook: {best_title.hook_type.value})")
                             break
                 
                 if not target_keyword:
@@ -469,6 +511,19 @@ async def content_generation_job(data: Dict[str, Any]) -> Dict[str, Any]:
                 logger.warning("Using emergency topic generation")
                 target_keyword = await _generate_emergency_topic(website_profile if 'website_profile' in locals() else None)
                 target_context = {"source": "Emergency Fallback (Research-Based)"}
+                
+                # Create minimal SEOContext for emergency fallback
+                if not seo_context:
+                    from src.models.seo_context import SEOContext, SEOElementStatus
+                    seo_context = SEOContext(
+                        source="EmergencyFallback",
+                        target_keyword=target_keyword,
+                        topic_title=target_keyword,
+                        selected_title=target_keyword,
+                        industry=website_profile.business_type if website_profile else "packaging",
+                        target_audience=website_profile.target_audience if website_profile else "b2b_buyers",
+                        status=SEOElementStatus.GENERATED
+                    )
 
         # Save keyword to database with IN_PROGRESS status
         keyword_record = db.query(Keyword).filter(Keyword.keyword == target_keyword).first()
@@ -495,6 +550,10 @@ async def content_generation_job(data: Dict[str, Any]) -> Dict[str, Any]:
             except:
                 pass
         
+        # Update SEOContext with semantic keywords
+        if seo_context:
+            seo_context.semantic_keywords = semantic_keywords
+        
         # --- Layer 3: Internal Linking Context ---
         existing_posts_context = []
         wp_adapter = WordPressAdapter(
@@ -508,100 +567,211 @@ async def content_generation_job(data: Dict[str, Any]) -> Dict[str, Any]:
             # Fetch recent posts for internal linking context
             recent_posts = await wp_adapter.get_simple_posts_for_linking(limit=10)
             existing_posts_context = [f"- {p['title']} (URL: {p['link']})" for p in recent_posts]
+            
+            # Update SEOContext with internal linking opportunities
+            if seo_context and recent_posts:
+                from src.models.seo_context import InternalLinkOpportunity
+                for post in recent_posts[:5]:  # Top 5 relevant posts
+                    opportunity = InternalLinkOpportunity(
+                        target_url=post['link'],
+                        target_title=post['title'],
+                        anchor_text_suggestions=[post['title'], f"{post['title']} guide", f"learn about {post['title']}"],
+                        relevance_score=0.7,  # TODO: Calculate actual relevance
+                        context_paragraph="TBD"  # Will be determined during content generation
+                    )
+                    seo_context.internal_links.append(opportunity)
+                    
         except Exception as e:
             logger.warning(f"Failed to fetch internal linking context: {e}")
 
         # --- Layer 4: Expert Content Creation (AI) ---
+        # Use ContentCreatorAgent with SEOContext for synchronized content generation
+        from src.agents.content_creator import ContentCreatorAgent
         from src.core.ai_provider import AIProviderFactory
-        ai = AIProviderFactory.create_from_config({
+        
+        ai_provider = AIProviderFactory.create_from_config({
             "name": settings.primary_ai_provider,
             "base_url": settings.primary_ai_base_url,
             "api_key": settings.primary_ai_api_key,
             "models": {"text": settings.primary_ai_text_model, "image": settings.primary_ai_image_model}
         })
         
-        # 4.1 Strategy & Outline Prompt
-        semantic_str = ", ".join(semantic_keywords) if semantic_keywords else "relevant industry terms"
-        linking_str = "\n".join(existing_posts_context) if existing_posts_context else "No existing posts to link to."
+        content_agent = ContentCreatorAgent(
+            name="content_creator",
+            ai_provider=ai_provider
+        )
         
-        outline_prompt = f"""
-        **Role**: Expert Content Strategist & Niche Authority.
-        **Task**: Create a comprehensive outline for "{target_keyword}".
-        **Audience**: Users with commercial/informational intent.
+        # Use SEOContext to create synchronized content
+        if seo_context:
+            logger.info(f"Using SEOContext for synchronized content generation")
+            logger.info(f"Selected title: {seo_context.selected_title}")
+            logger.info(f"Hook type: {seo_context.title_hook_type.value if seo_context.title_hook_type else 'N/A'}")
+            
+            # Create task from SEOContext
+            creator_task = seo_context.to_content_creator_task()
+            creator_task["products"] = []  # Could be populated from website profile
+            
+            # Generate content using ContentCreatorAgent
+            content_result = await content_agent.execute(creator_task)
+            
+            if content_result.get("status") == "success":
+                content_html = content_result.get("content", "")
+                seo_context.content_html = content_html
+                seo_context.content_word_count = len(content_html.split())
+                logger.info(f"Content generated: {seo_context.content_word_count} words")
+            else:
+                logger.error(f"Content generation failed: {content_result.get('error', 'Unknown error')}")
+                raise Exception("Content generation failed")
+        else:
+            # Fallback to legacy generation if SEOContext not available
+            logger.warning("SEOContext not available, using legacy content generation")
+            
+            from src.core.ai_provider import AIProviderFactory
+            ai_provider = AIProviderFactory.create_from_config({
+                "name": settings.primary_ai_provider,
+                "base_url": settings.primary_ai_base_url,
+                "api_key": settings.primary_ai_api_key,
+                "models": {"text": settings.primary_ai_text_model, "image": settings.primary_ai_image_model}
+            })
+            
+            semantic_str = ", ".join(semantic_keywords) if semantic_keywords else "relevant industry terms"
+            linking_str = "\n".join(existing_posts_context) if existing_posts_context else "No existing posts to link to."
+            
+            outline_prompt = f"""
+            **Role**: Expert Content Strategist & Niche Authority.
+            **Task**: Create a comprehensive outline for "{target_keyword}".
+            **Audience**: Users with commercial/informational intent.
+            
+            **SEO Requirements**:
+            1. Primary Keyword: "{target_keyword}"
+            2. Semantic Terms to Weave in: {semantic_str}
+            3. E-E-A-T: Must demonstrate depth and first-hand expertise.
+            
+            **Structure Requirements**:
+            - **H1**: High-CTR title.
+            - **Introduction**: Hook + "The Verdict" (Quick Answer).
+            - **Body**: 4-6 Deep Dive Sections. MUST include a "Comparison" or "Data Analysis" section.
+            - **Value Add**: A "Step-by-Step Guide", "Checklist", or "Pro Tips" box.
+            - **FAQ**: 3-5 real questions humans ask (Schema ready).
+            """
+            
+            outline = await ai_provider.generate_text(outline_prompt, temperature=0.7)
+            
+            article_prompt = f"""
+            **Role**: Senior Industry Journalist.
+            **Task**: Write the FULL article based on this outline:
+            {outline}
+            
+            **Writing Guidelines**:
+            - **Length**: 1500-2500 words (Depth is key).
+            - **Tone**: Professional yet accessible. Avoid "AI fluff" words (like "realm", "landscape", "testament").
+            - **Formatting**: Rich HTML. Use <h2>, <h3>, <ul>, <strong>, <blockquote>.
+            - **Data/Tables**: You MUST create at least one HTML data table (<table>).
+            
+            **Internal Linking Directive**:
+            Naturally mention and link to 1-2 of these existing articles where relevant:
+            {linking_str}
+            (Format: <a href="URL">Title</a>)
+            
+            **Output Format**:
+            Return ONLY the HTML body content (no <html> or <body> tags).
+            """
+            
+            # High timeout for deep content
+            content_html = await ai_provider.generate_text(article_prompt, temperature=0.7, max_tokens=3500)
         
-        **SEO Requirements**:
-        1. Primary Keyword: "{target_keyword}"
-        2. Semantic Terms to Weave in: {semantic_str}
-        3. E-E-A-T: Must demonstrate depth and first-hand expertise.
-        
-        **Structure Requirements**:
-        - **H1**: High-CTR title.
-        - **Introduction**: Hook + "The Verdict" (Quick Answer).
-        - **Body**: 4-6 Deep Dive Sections. MUST include a "Comparison" or "Data Analysis" section.
-        - **Value Add**: A "Step-by-Step Guide", "Checklist", or "Pro Tips" box.
-        - **FAQ**: 3-5 real questions humans ask (Schema ready).
-        """
-        
-        outline = await ai.generate_text(outline_prompt, temperature=0.7)
-        
-        # 4.2 Full Content Prompt
-        article_prompt = f"""
-        **Role**: Senior Industry Journalist.
-        **Task**: Write the FULL article based on this outline:
-        {outline}
-        
-        **Writing Guidelines**:
-        - **Length**: 1500-2500 words (Depth is key).
-        - **Tone**: Professional yet accessible. Avoid "AI fluff" words (like "realm", "landscape", "testament").
-        - **Formatting**: Rich HTML. Use <h2>, <h3>, <ul>, <strong>, <blockquote>.
-        - **Data/Tables**: You MUST create at least one HTML data table (<table>).
-        
-        **Internal Linking Directive**:
-        Naturally mention and link to 1-2 of these existing articles where relevant:
-        {linking_str}
-        (Format: <a href="URL">Title</a>)
-        
-        **Output Format**:
-        Return ONLY the HTML body content (no <html> or <body> tags).
-        """
-        
-        # High timeout for deep content
-        content_html = await ai.generate_text(article_prompt, temperature=0.7, max_tokens=3500)
-        
-        # 4.3 Meta Prompt (SMART DYNAMIC YEAR)
+        # 4.3 Synchronized Meta Generation (using selected title from SEOContext)
         current_year = datetime.now().year
-        meta_prompt = f"""
-        Generate JSON SEO Metadata for this article about "{target_keyword}".
-        Current Year: {current_year}
         
-        Format: {{"title": "...", "meta_description": "...", "excerpt": "..."}}
-        
-        Guidelines:
-        - Title: Use ONE of these formats randomly:
-          1. "How to [X]..." (NO year)
-          2. "[N] Best [X] ({current_year} Review)" (Use year)
-          3. "The Complete [X] Guide" (NO year)
-          4. "[X] Explained: What You Need to Know" (NO year)
-          5. "Top [N] [X] Trends for {current_year}" (Use year)
-        
-        - Desc: <160 chars, compelling hook. You make use "Updated for {current_year}" if relevant, but do not overuse.
-        """
-        meta_json_str = await ai.generate_text(meta_prompt, temperature=0.5)
-        
-        try:
-            import json
-            clean_json = meta_json_str.replace("```json", "").replace("```", "").strip()
-            meta_data = json.loads(clean_json)
-        except:
-            meta_data = {"title": f"{target_keyword} Guide", "meta_description": "Read more...", "excerpt": ""}
+        if seo_context and seo_context.selected_title:
+            # Use SEOContext for synchronized meta generation
+            # Title is already selected - DON'T regenerate it
+            selected_title = seo_context.selected_title
+            hook_type = seo_context.title_hook_type.value if seo_context.title_hook_type else "general"
+            
+            # Generate meta description based on the ALREADY SELECTED title
+            meta_prompt = f"""
+Generate a compelling meta description for an article titled:
+"{selected_title}"
 
-        result["steps"].append({ "step": "creation", "data": {"words": len(content_html.split()), "model": settings.primary_ai_text_model} })
+Target Keyword: {target_keyword}
+Hook Type: {hook_type}
+Current Year: {current_year}
+
+Requirements:
+- MUST be 150-160 characters maximum
+- MUST align with the {hook_type} hook type of the title
+- Include a compelling call-to-action
+- Mention "Updated {current_year}" if relevant, but do not overuse
+- Focus on the value proposition for {seo_context.target_audience if seo_context else 'readers'}
+
+Output ONLY the meta description text (no JSON, no quotes).
+"""
+            
+            meta_description = await ai_provider.generate_text(meta_prompt, temperature=0.6, max_tokens=200)
+            meta_description = meta_description.strip().replace('"', '')
+            
+            # Ensure length constraint
+            if len(meta_description) > 160:
+                meta_description = meta_description[:157] + "..."
+            
+            # Create excerpt from content or meta description
+            excerpt = seo_context.content_html[:300] + "..." if seo_context and seo_context.content_html else meta_description
+            
+            meta_data = {
+                "title": selected_title,  # CRITICAL: Use the selected title, don't regenerate!
+                "meta_description": meta_description,
+                "excerpt": excerpt
+            }
+            
+            # Update SEOContext
+            seo_context.meta_title = selected_title
+            seo_context.meta_description = meta_description
+            
+            logger.info(f"Synchronized meta generated for title: {selected_title}")
+            logger.info(f"Meta description: {meta_description[:60]}...")
+            
+        else:
+            # Legacy meta generation (for backward compatibility)
+            meta_prompt = f"""
+            Generate JSON SEO Metadata for this article about "{target_keyword}".
+            Current Year: {current_year}
+            
+            Format: {{"title": "...", "meta_description": "...", "excerpt": "..."}}
+            
+            Guidelines:
+            - Title: Use ONE of these formats randomly:
+              1. "How to [X]..." (NO year)
+              2. "[N] Best [X] ({current_year} Review)" (Use year)
+              3. "The Complete [X] Guide" (NO year)
+              4. "[X] Explained: What You Need to Know" (NO year)
+              5. "Top [N] [X] Trends for {current_year}" (Use year)
+            
+            - Desc: <160 chars, compelling hook.
+            """
+            meta_json_str = await ai_provider.generate_text(meta_prompt, temperature=0.5)
+            
+            try:
+                import json
+                clean_json = meta_json_str.replace("```json", "").replace("```", "").strip()
+                meta_data = json.loads(clean_json)
+            except:
+                meta_data = {"title": f"{target_keyword} Guide", "meta_description": "Read more...", "excerpt": ""}
+
+        result["steps"].append({ 
+            "step": "creation", 
+            "data": {
+                "words": seo_context.content_word_count if seo_context else len(content_html.split()),
+                "model": settings.primary_ai_text_model,
+                "title_synchronized": seo_context.selected_title if seo_context else False
+            } 
+        })
 
         # --- Layer 4.4: Generate Featured Image ---
         featured_image_bytes = None
         try:
             from src.agents.media_creator import MediaCreatorAgent
-            media_agent = MediaCreatorAgent(ai_provider=ai)
+            media_agent = MediaCreatorAgent(ai_provider=ai_provider)
             
             image_task = {
                 "type": "create_featured_image",
@@ -614,24 +784,35 @@ async def content_generation_job(data: Dict[str, Any]) -> Dict[str, Any]:
                 featured_image_bytes = image_result.get("image")
                 logger.info(f"Featured image generated: {len(featured_image_bytes)} bytes")
             
-            result["steps"].append({ "step": "image_generation", "data": {"status": "success", "size": len(featured_image_bytes)} })
+            result["steps"].append({ "step": "image_generation", "data": {"status": "success", "size": len(featured_image_bytes) if featured_image_bytes else 0} })
         except Exception as img_error:
             logger.warning(f"Image generation failed, continuing without image: {img_error}")
             result["steps"].append({ "step": "image_generation", "data": {"status": "skipped", "error": str(img_error)} })
 
         # --- Layer 5: Publishing ---
+        # Use content from SEOContext if available, otherwise from legacy generation
+        final_content = seo_context.content_html if seo_context and seo_context.content_html else content_html
+        final_title = meta_data.get("title", target_keyword)
+        
+        # Validate synchronization before publishing
+        if seo_context:
+            validation = seo_context.validate_synchronization()
+            if not validation["valid"]:
+                logger.warning(f"SEO synchronization issues detected: {validation['issues']}")
+            logger.info(f"SEO validation score: {validation['score']}/100")
+        
         content = PublishableContent(
-            title=meta_data.get("title"),
-            content=content_html,
+            title=final_title,
+            content=final_content,
             excerpt=meta_data.get("excerpt"),
             status="publish" if auto_publish else "draft",
-            seo_title=meta_data.get("title"),
+            seo_title=final_title,  # Same as title for consistency
             seo_description=meta_data.get("meta_description"),
             focus_keyword=target_keyword,
             categories=["Blog", "Guides"],
             featured_image_data=featured_image_bytes,
-            featured_image_alt=meta_data.get("title"),
-            source_type="autopilot_advanced_seo"
+            featured_image_alt=final_title,
+            source_type="autopilot_advanced_seo_synchronized" if seo_context else "autopilot_advanced_seo"
         )
         
         publish_result = await wp_adapter.publish(content)
@@ -651,8 +832,8 @@ async def content_generation_job(data: Dict[str, Any]) -> Dict[str, Any]:
             from src.models.content import Content, ContentStatus
             content_record = Content(
                 keyword_id=keyword_record.id if keyword_record else None,
-                title=meta_data.get("title"),
-                body=content_html,
+                title=final_title,
+                body=final_content,
                 meta_description=meta_data.get("meta_description"),
                 status=ContentStatus.PUBLISHED,
                 wordpress_post_id=publish_result.post_id
