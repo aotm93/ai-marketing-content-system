@@ -332,16 +332,46 @@ async def content_generation_job(data: Dict[str, Any]) -> Dict[str, Any]:
                         }
                         logger.info(f"Selected unused GSC keyword: {target_keyword}")
                         
-                        # Create SEOContext for GSC keyword
+                        # Generate optimized title using HookOptimizer
+                        from src.services.content.hook_optimizer import HookOptimizer
+                        from src.models.content_intelligence import ContentTopic, HookType
+                        hook_optimizer = HookOptimizer()
+                        
+                        # Create temporary topic for title optimization
+                        temp_topic = ContentTopic(
+                            title=target_keyword,
+                            angle=f"comprehensive guide to {target_keyword}",
+                            hook_type=HookType.HOW_TO,
+                            industry=website_profile.business_type if 'website_profile' in locals() and website_profile else "packaging",
+                            target_audience=website_profile.target_audience if 'website_profile' in locals() and website_profile else "b2b_buyers",
+                            business_intent=0.7,
+                            trend_score=0.6,
+                            competition_score=0.5,
+                            differentiation_score=0.6,
+                            brand_alignment_score=0.7
+                        )
+                        
+                        # Generate optimized titles
+                        optimized_titles = await hook_optimizer.generate_optimized_titles(temp_topic, count=5)
+                        if optimized_titles:
+                            best_title = await hook_optimizer.select_best_title(optimized_titles, strategy="balanced")
+                            selected_title = best_title.title
+                            logger.info(f"Generated optimized title for GSC keyword: {selected_title}")
+                        else:
+                            selected_title = target_keyword
+                        
+                        # Create SEOContext for GSC keyword with optimized title
                         from src.models.seo_context import SEOContext, SEOElementStatus
-                        from src.models.content_intelligence import HookType
                         seo_context = SEOContext(
                             content_id=f"gsc_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{target_keyword[:30]}",
                             source="GSC",
                             target_keyword=target_keyword,
                             topic_title=target_keyword,
-                            selected_title=target_keyword,
-                            title_hook_type=HookType.HOW_TO,
+                            selected_title=selected_title,
+                            optimized_titles=optimized_titles,
+                            selected_title_variant=best_title.test_variant if optimized_titles else "A",
+                            title_hook_type=best_title.hook_type if optimized_titles else HookType.HOW_TO,
+                            title_ctr_estimate=best_title.expected_ctr if optimized_titles else 0.04,
                             status=SEOElementStatus.GENERATED
                         )
                         break
@@ -396,10 +426,37 @@ async def content_generation_job(data: Dict[str, Any]) -> Dict[str, Any]:
                     }
                     logger.info(f"Selected content-aware keyword: {target_keyword} (Stage: {selected.journey_stage.value})")
                     
-                    # Create SEOContext for Content-Aware keyword
+                    # Generate optimized title using HookOptimizer
                     if not seo_context:
+                        from src.services.content.hook_optimizer import HookOptimizer
+                        from src.models.content_intelligence import ContentTopic, HookType
                         from src.models.seo_context import SEOContext, SEOElementStatus
-                        from src.models.content_intelligence import HookType
+                        hook_optimizer = HookOptimizer()
+                        
+                        # Create temporary topic for title optimization
+                        temp_topic = ContentTopic(
+                            title=target_keyword,
+                            angle=f"comprehensive guide to {target_keyword}",
+                            hook_type=HookType.HOW_TO,
+                            industry=website_profile.business_type if website_profile else "packaging",
+                            target_audience=website_profile.target_audience if website_profile else "b2b_buyers",
+                            business_intent=0.7,
+                            trend_score=0.6,
+                            competition_score=0.5,
+                            differentiation_score=0.6,
+                            brand_alignment_score=0.7
+                        )
+                        
+                        # Generate optimized titles
+                        optimized_titles = await hook_optimizer.generate_optimized_titles(temp_topic, count=5)
+                        if optimized_titles:
+                            best_title = await hook_optimizer.select_best_title(optimized_titles, strategy="balanced")
+                            selected_title = best_title.title
+                            logger.info(f"Generated optimized title for Content-Aware keyword: {selected_title}")
+                        else:
+                            selected_title = target_keyword
+                        
+                        # Create SEOContext for Content-Aware keyword with optimized title
                         seo_context = SEOContext(
                             content_id=f"ca_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{target_keyword[:30]}",
                             source="ContentAware",
@@ -407,8 +464,11 @@ async def content_generation_job(data: Dict[str, Any]) -> Dict[str, Any]:
                             target_audience=website_profile.target_audience if website_profile else "b2b",
                             target_keyword=target_keyword,
                             topic_title=target_keyword,
-                            selected_title=target_keyword,
-                            title_hook_type=HookType.HOW_TO,
+                            selected_title=selected_title,
+                            optimized_titles=optimized_titles,
+                            selected_title_variant=best_title.test_variant if optimized_titles else "A",
+                            title_hook_type=best_title.hook_type if optimized_titles else HookType.HOW_TO,
+                            title_ctr_estimate=best_title.expected_ctr if optimized_titles else 0.04,
                             status=SEOElementStatus.GENERATED
                         )
             except Exception as e:
@@ -439,17 +499,47 @@ async def content_generation_job(data: Dict[str, Any]) -> Dict[str, Any]:
                         }
                         logger.info(f"Selected unused Keyword API keyword: {target_keyword}")
                         
-                        # Create SEOContext for Keyword API keyword
+                        # Generate optimized title using HookOptimizer
                         if not seo_context:
+                            from src.services.content.hook_optimizer import HookOptimizer
+                            from src.models.content_intelligence import ContentTopic, HookType
                             from src.models.seo_context import SEOContext, SEOElementStatus
-                            from src.models.content_intelligence import HookType
+                            hook_optimizer = HookOptimizer()
+                            
+                            # Create temporary topic for title optimization
+                            temp_topic = ContentTopic(
+                                title=target_keyword,
+                                angle=f"comprehensive guide to {target_keyword}",
+                                hook_type=HookType.HOW_TO,
+                                industry=website_profile.business_type if 'website_profile' in locals() and website_profile else "packaging",
+                                target_audience=website_profile.target_audience if 'website_profile' in locals() and website_profile else "b2b_buyers",
+                                business_intent=0.7,
+                                trend_score=0.6,
+                                competition_score=0.5,
+                                differentiation_score=0.6,
+                                brand_alignment_score=0.7
+                            )
+                            
+                            # Generate optimized titles
+                            optimized_titles = await hook_optimizer.generate_optimized_titles(temp_topic, count=5)
+                            if optimized_titles:
+                                best_title = await hook_optimizer.select_best_title(optimized_titles, strategy="balanced")
+                                selected_title = best_title.title
+                                logger.info(f"Generated optimized title for Keyword API keyword: {selected_title}")
+                            else:
+                                selected_title = target_keyword
+                            
+                            # Create SEOContext for Keyword API keyword with optimized title
                             seo_context = SEOContext(
                                 content_id=f"api_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{target_keyword[:30]}",
                                 source="KeywordAPI",
                                 target_keyword=target_keyword,
                                 topic_title=target_keyword,
-                                selected_title=target_keyword,
-                                title_hook_type=HookType.HOW_TO,
+                                selected_title=selected_title,
+                                optimized_titles=optimized_titles,
+                                selected_title_variant=best_title.test_variant if optimized_titles else "A",
+                                title_hook_type=best_title.hook_type if optimized_titles else HookType.HOW_TO,
+                                title_ctr_estimate=best_title.expected_ctr if optimized_titles else 0.04,
                                 status=SEOElementStatus.GENERATED
                             )
                         break
