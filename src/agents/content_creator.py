@@ -243,17 +243,22 @@ class ContentCreatorAgent(BaseAgent):
 **Length**: 2000+ words (comprehensive coverage required)
 
 **Keyword Integration**:
-- Primary keyword "{keyword}" should appear naturally 1-2% density
-- Include semantic keywords throughout
+- Use primary keyword "{keyword}" and its synonyms naturally throughout
+- Include semantic keywords to build topical authority
 - First paragraph MUST contain the primary keyword
+- Focus on semantic relevance, not keyword density
 
 **Content Quality Standards**:
 1. **Title-Content Alignment**: Every section must deliver on the title's promise
 2. **Data-Driven**: Use statistics and research data provided
 3. **Actionable**: Include practical steps and "Pro Tips" callout boxes
-4. **Expert Tone**: Demonstrate E-E-A-T (Experience, Expertise, Authoritativeness, Trust)
-5. **Rich Formatting**: Use H2, H3, bullet points, tables, and blockquotes
-6. **Internal Links**: Naturally mention 2-3 related articles with anchor text
+4. **Featured Snippet Optimization**:
+   - Provide a concise 40-60 word answer in the first paragraph
+   - Use clear formatting (lists, tables) for step-by-step content
+   - Structure FAQ with direct question-answer format
+5. **Expert Tone**: Demonstrate E-E-A-T (Experience, Expertise, Authoritativeness, Trust)
+6. **Rich Formatting**: Use H2, H3, bullet points, tables, and blockquotes
+7. **Internal Links**: Naturally mention 2-3 related articles with anchor text
 
 **Products to Mention**:
 {products if products else 'None specified'}

@@ -13,13 +13,14 @@ from src.models.content_intelligence import (
     ContentTopic, OptimizedTitle, HookType, ResearchResult
 )
 from src.services.content.intent_analyzer import SearchIntentAnalyzer, UserIntent
+from src.services.content.title_matcher import TitleQueryMatcher
 
 logger = logging.getLogger(__name__)
 
 
 class HookOptimizer:
     """Generate optimized titles with multiple hook variants"""
-    
+
     # CTR baseline estimates by hook type
     CTR_BASELINES = {
         HookType.DATA: 0.045,
@@ -33,7 +34,8 @@ class HookOptimizer:
     def __init__(self):
         self.title_templates = self._load_title_templates()
         self.intent_analyzer = SearchIntentAnalyzer()
-        logger.info("HookOptimizer initialized with SearchIntentAnalyzer")
+        self.title_matcher = TitleQueryMatcher()
+        logger.info("HookOptimizer initialized with SearchIntentAnalyzer and TitleQueryMatcher")
     
     def _load_title_templates(self) -> dict:
         """Load title templates by hook type"""
@@ -322,37 +324,46 @@ class HookOptimizer:
     async def select_best_title(
         self,
         variants: List[OptimizedTitle],
-        strategy: str = "ctr"  # "ctr", "balanced", "experimental"
+        strategy: str = "ctr",  # "ctr", "balanced", "experimental"
+        target_keyword: str = None
     ) -> OptimizedTitle:
         """
         Select the best title based on strategy
-        
+
         Args:
             variants: List of title variants
             strategy: Selection strategy (ctr, balanced, experimental)
-            
+            target_keyword: Optional keyword to match against
+
         Returns:
             The selected OptimizedTitle
         """
         if not variants:
             raise ValueError("No variants provided")
-        
+
+        # If target_keyword provided, boost scores based on match
+        if target_keyword:
+            for variant in variants:
+                match_score = self.title_matcher.calculate_match_score(variant.title, target_keyword)
+                # Boost CTR by up to 20% based on match score
+                variant.expected_ctr = variant.expected_ctr * (1 + match_score * 0.2)
+
         if strategy == "ctr":
             # Pure CTR optimization
             return max(variants, key=lambda x: x.expected_ctr)
-        
+
         elif strategy == "balanced":
             # Balance CTR with variety
             # Prefer data or problem hooks if CTR is close
             best_ctr = max(variants, key=lambda x: x.expected_ctr)
-            
+
             for variant in variants:
                 if variant.hook_type in [HookType.DATA, HookType.PROBLEM]:
                     if variant.expected_ctr >= best_ctr.expected_ctr * 0.95:
                         return variant
-            
+
             return best_ctr
-        
+
         elif strategy == "experimental":
             # Try less common hook types occasionally
             uncommon_hooks = [HookType.CONTROVERSY, HookType.STORY]

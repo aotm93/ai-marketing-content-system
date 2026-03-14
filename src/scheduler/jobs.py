@@ -356,7 +356,7 @@ async def content_generation_job(data: Dict[str, Any]) -> Dict[str, Any]:
                         # Generate optimized titles
                         optimized_titles = await hook_optimizer.generate_optimized_titles(temp_topic, count=5)
                         if optimized_titles:
-                            best_title = await hook_optimizer.select_best_title(optimized_titles, strategy="balanced")
+                            best_title = await hook_optimizer.select_best_title(optimized_titles, strategy="balanced", target_keyword=target_keyword)
                             selected_title = best_title.title
                             logger.info(f"Generated optimized title for GSC keyword: {selected_title}")
                         else:
@@ -453,7 +453,7 @@ async def content_generation_job(data: Dict[str, Any]) -> Dict[str, Any]:
                         # Generate optimized titles
                         optimized_titles = await hook_optimizer.generate_optimized_titles(temp_topic, count=5)
                         if optimized_titles:
-                            best_title = await hook_optimizer.select_best_title(optimized_titles, strategy="balanced")
+                            best_title = await hook_optimizer.select_best_title(optimized_titles, strategy="balanced", target_keyword=target_keyword)
                             selected_title = best_title.title
                             logger.info(f"Generated optimized title for Content-Aware keyword: {selected_title}")
                         else:
@@ -527,7 +527,7 @@ async def content_generation_job(data: Dict[str, Any]) -> Dict[str, Any]:
                             # Generate optimized titles
                             optimized_titles = await hook_optimizer.generate_optimized_titles(temp_topic, count=5)
                             if optimized_titles:
-                                best_title = await hook_optimizer.select_best_title(optimized_titles, strategy="balanced")
+                                best_title = await hook_optimizer.select_best_title(optimized_titles, strategy="balanced", target_keyword=target_keyword)
                                 selected_title = best_title.title
                                 logger.info(f"Generated optimized title for Keyword API keyword: {selected_title}")
                             else:
@@ -603,7 +603,7 @@ async def content_generation_job(data: Dict[str, Any]) -> Dict[str, Any]:
                             optimized_titles = await hook_optimizer.generate_optimized_titles(topic, count=5)
                             
                             # Select best title based on CTR strategy
-                            best_title = await hook_optimizer.select_best_title(optimized_titles, strategy="balanced")
+                            best_title = await hook_optimizer.select_best_title(optimized_titles, strategy="balanced", target_keyword=target_keyword)
                             
                             # Create unified SEOContext
                             seo_context = SEOContext(

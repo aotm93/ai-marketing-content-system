@@ -52,6 +52,7 @@ Requirements:
 - Provide data-backed evidence
 - Give actionable solutions
 - Avoid generic advice like "be careful" or "follow best practices"
+- Start with a concise 40-60 word summary for Featured Snippet optimization
 
 Key points to cover: {', '.join(section.key_points)}"""
 
@@ -60,13 +61,20 @@ Key points to cover: {', '.join(section.key_points)}"""
 
 Requirements:
 - Provide specific technical parameters and data
-- Compare different specifications
+- Compare different specifications in table format
 - Reference industry standards
 - Skip basic introductory explanations
+- Use structured format (lists/tables) for Featured Snippet eligibility
 
 Key points to cover: {', '.join(section.key_points)}"""
 
         return f"""Write professional content for: {section.title}
+
+Requirements:
+- Start with a clear, concise answer (40-60 words)
+- Use structured formatting (lists, tables) where appropriate
+- Provide specific, actionable information
+
 Key points: {', '.join(section.key_points)}"""
 
     def get_content_requirements(self, intent: UserIntent) -> dict:
