@@ -13,11 +13,12 @@ class ContentCreatorAgent(BaseAgent):
     Creates SEO-optimized content with full SEO context synchronization
     """
 
-    def __init__(self):
+    def __init__(self, name: str = "ContentCreator", **kwargs):
         super().__init__()
+        self.name = name
         self.professional_writer = ProfessionalContentWriter()
         self.intent_analyzer = SearchIntentAnalyzer()
-        logger.info("ContentCreatorAgent initialized with professional content generation")
+        logger.info(f"{self.name} initialized with professional content generation")
 
     async def execute(self, task: Dict[str, Any]) -> Dict[str, Any]:
         """Execute content creation task"""
