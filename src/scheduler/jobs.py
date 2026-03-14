@@ -762,14 +762,18 @@ async def content_generation_job(data: Dict[str, Any]) -> Dict[str, Any]:
         # Use ContentCreatorAgent with SEOContext for synchronized content generation
         from src.agents.content_creator import ContentCreatorAgent
         from src.core.ai_provider import AIProviderFactory
-        
+
         ai_provider = AIProviderFactory.create_from_config({
             "name": settings.primary_ai_provider,
             "base_url": settings.primary_ai_base_url,
             "api_key": settings.primary_ai_api_key,
             "models": {"text": settings.primary_ai_text_model, "image": settings.primary_ai_image_model}
         })
-        
+
+        if not ai_provider:
+            logger.error("Failed to create AI provider - check configuration")
+            raise Exception("AI provider initialization failed")
+
         content_agent = ContentCreatorAgent(
             name="content_creator",
             ai_provider=ai_provider
