@@ -280,6 +280,7 @@ async def content_generation_job(data: Dict[str, Any]) -> Dict[str, Any]:
         target_keyword = None
         target_context = {}
         keyword_record = None
+        seo_context = None  # Initialize SEOContext variable
 
         # Get already used keywords from database
         from src.models.keyword import Keyword, KeywordStatus
@@ -348,7 +349,8 @@ async def content_generation_job(data: Dict[str, Any]) -> Dict[str, Any]:
                             trend_score=0.6,
                             competition_score=0.5,
                             differentiation_score=0.6,
-                            brand_alignment_score=0.7
+                            brand_alignment_score=0.7,
+                            value_score=0.65
                         )
                         
                         # Generate optimized titles
@@ -444,7 +446,8 @@ async def content_generation_job(data: Dict[str, Any]) -> Dict[str, Any]:
                             trend_score=0.6,
                             competition_score=0.5,
                             differentiation_score=0.6,
-                            brand_alignment_score=0.7
+                            brand_alignment_score=0.7,
+                            value_score=0.65
                         )
                         
                         # Generate optimized titles
@@ -517,7 +520,8 @@ async def content_generation_job(data: Dict[str, Any]) -> Dict[str, Any]:
                                 trend_score=0.6,
                                 competition_score=0.5,
                                 differentiation_score=0.6,
-                                brand_alignment_score=0.7
+                                brand_alignment_score=0.7,
+                                value_score=0.65
                             )
                             
                             # Generate optimized titles
