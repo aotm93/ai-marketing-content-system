@@ -12,6 +12,7 @@ from datetime import datetime
 from src.models.content_intelligence import (
     ContentTopic, OptimizedTitle, HookType, ResearchResult
 )
+from src.services.content.intent_analyzer import SearchIntentAnalyzer, UserIntent
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +32,8 @@ class HookOptimizer:
     
     def __init__(self):
         self.title_templates = self._load_title_templates()
-        logger.info("HookOptimizer initialized")
+        self.intent_analyzer = SearchIntentAnalyzer()
+        logger.info("HookOptimizer initialized with SearchIntentAnalyzer")
     
     def _load_title_templates(self) -> dict:
         """Load title templates by hook type"""
@@ -121,6 +123,32 @@ class HookOptimizer:
         
         logger.info(f"Generated {len(variants)} title variants")
         return variants
+
+    def generate_optimized_titles_sync(
+        self,
+        topic: ContentTopic,
+        count: int = 5
+    ) -> List[OptimizedTitle]:
+        """Synchronous version for testing"""
+        variants = []
+        research = topic.research_result
+        hook_types = list(HookType)[:count]
+
+        for i, hook_type in enumerate(hook_types):
+            title, rationale = self._generate_title_for_hook(topic, research, hook_type)
+            expected_ctr = self._estimate_ctr(hook_type, topic, research)
+
+            variant = OptimizedTitle(
+                title=title,
+                hook_type=hook_type,
+                expected_ctr=expected_ctr,
+                rationale=rationale,
+                test_variant=chr(ord('A') + i)
+            )
+            variants.append(variant)
+
+        variants.sort(key=lambda x: x.expected_ctr, reverse=True)
+        return variants
     
     def _generate_title_for_hook(
         self,
@@ -128,25 +156,32 @@ class HookOptimizer:
         research: ResearchResult,
         hook_type: HookType
     ) -> tuple[str, str]:
-        """Generate a title for a specific hook type"""
-        
+        """Generate a title for a specific hook type using intent analysis"""
+
+        # Use intent analyzer for PROBLEM and HOW_TO hooks
+        if hook_type in [HookType.PROBLEM, HookType.HOW_TO]:
+            intent_signal = self.intent_analyzer.analyze_intent(
+                topic.title,
+                related_keywords=[topic.angle] if topic.angle else []
+            )
+            title = self.intent_analyzer.generate_intent_based_title(intent_signal)
+            rationale = f"Intent-based title for {intent_signal.intent.value} (confidence: {intent_signal.confidence:.0%})"
+            return title, rationale
+
+        # Use templates for DATA and other hooks
         templates = self.title_templates.get(hook_type, [])
         if not templates:
             return topic.title, "Fallback title"
-        
+
         template = random.choice(templates)
-        
-        # Build context for template filling
         context = self._build_template_context(topic, research, hook_type)
-        
+
         try:
             title = template.format(**context)
         except KeyError:
-            # Fallback if template variables missing
             title = self._generate_fallback_title(topic, hook_type)
-        
+
         rationale = self._generate_rationale(hook_type, context)
-        
         return title, rationale
     
     def _build_template_context(

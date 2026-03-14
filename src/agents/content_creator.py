@@ -1,6 +1,8 @@
 from typing import Dict, Any, Optional, List
 import logging
 from .base_agent import BaseAgent
+from src.services.content.professional_writer import ProfessionalContentWriter
+from src.services.content.intent_analyzer import SearchIntentAnalyzer
 
 logger = logging.getLogger(__name__)
 
@@ -10,6 +12,12 @@ class ContentCreatorAgent(BaseAgent):
     Content Creator Agent - Acts as the Content Writer
     Creates SEO-optimized content with full SEO context synchronization
     """
+
+    def __init__(self):
+        super().__init__()
+        self.professional_writer = ProfessionalContentWriter()
+        self.intent_analyzer = SearchIntentAnalyzer()
+        logger.info("ContentCreatorAgent initialized with professional content generation")
 
     async def execute(self, task: Dict[str, Any]) -> Dict[str, Any]:
         """Execute content creation task"""
@@ -204,7 +212,28 @@ class ContentCreatorAgent(BaseAgent):
                 suggestions = link.get('anchor_text_suggestions', [])
                 if suggestions:
                     prompt += f"  Suggested anchors: {', '.join(suggestions[:2])}\n"
-        
+
+        # Add professional content requirements based on intent
+        intent_signal = self.intent_analyzer.analyze_intent(keyword)
+        content_reqs = self.professional_writer.get_content_requirements(intent_signal.intent)
+
+        if content_reqs:
+            prompt += f"""
+
+## PROFESSIONAL CONTENT REQUIREMENTS (Intent: {intent_signal.intent.value})
+"""
+            if content_reqs.get('root_cause_analysis'):
+                prompt += "- Explain root causes with specific technical details\n"
+            if content_reqs.get('actionable_solutions'):
+                prompt += "- Provide data-backed, actionable solutions\n"
+            if content_reqs.get('technical_parameters'):
+                prompt += "- Include specific technical parameters and data\n"
+            if content_reqs.get('require_standards'):
+                prompt += "- Reference industry standards\n"
+            if content_reqs.get('avoid_generic'):
+                prompt += "- Avoid generic advice like 'be careful' or 'follow best practices'\n"
+                prompt += "- Skip basic introductory explanations\n"
+
         # Add comprehensive writing guidelines
         prompt += f"""
 
