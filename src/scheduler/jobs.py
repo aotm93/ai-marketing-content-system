@@ -652,15 +652,48 @@ async def content_generation_job(data: Dict[str, Any]) -> Dict[str, Any]:
                 logger.warning("Using emergency topic generation")
                 target_keyword = await _generate_emergency_topic(website_profile if 'website_profile' in locals() else None)
                 target_context = {"source": "Emergency Fallback (Research-Based)"}
-                
-                # Create minimal SEOContext for emergency fallback
+
+                # Create minimal SEOContext for emergency fallback with optimized title
                 if not seo_context:
                     from src.models.seo_context import SEOContext, SEOElementStatus
+                    from src.services.content.hook_optimizer import HookOptimizer
+                    from src.models.content_intelligence import ContentTopic, HookType
+
+                    hook_optimizer = HookOptimizer()
+
+                    # Create temp topic for title optimization
+                    temp_topic = ContentTopic(
+                        title=target_keyword,
+                        angle=f"emergency fallback for {target_keyword}",
+                        hook_type=HookType.HOW_TO,
+                        industry=website_profile.business_type if website_profile else "packaging",
+                        target_audience=website_profile.target_audience if website_profile else "b2b_buyers",
+                        business_intent=0.6,
+                        trend_score=0.5,
+                        competition_score=0.5,
+                        differentiation_score=0.5,
+                        brand_alignment_score=0.6,
+                        value_score=0.55
+                    )
+
+                    # Generate optimized title
+                    optimized_titles = await hook_optimizer.generate_optimized_titles(temp_topic, count=3)
+                    if optimized_titles:
+                        best_title = await hook_optimizer.select_best_title(optimized_titles, strategy="balanced")
+                        selected_title = best_title.title
+                        logger.info(f"Emergency fallback optimized title: {selected_title}")
+                    else:
+                        selected_title = target_keyword
+
                     seo_context = SEOContext(
                         source="EmergencyFallback",
                         target_keyword=target_keyword,
                         topic_title=target_keyword,
-                        selected_title=target_keyword,
+                        selected_title=selected_title,
+                        optimized_titles=optimized_titles if optimized_titles else [],
+                        selected_title_variant=best_title.test_variant if optimized_titles else "A",
+                        title_hook_type=best_title.hook_type if optimized_titles else HookType.HOW_TO,
+                        title_ctr_estimate=best_title.expected_ctr if optimized_titles else 0.04,
                         industry=website_profile.business_type if website_profile else "packaging",
                         target_audience=website_profile.target_audience if website_profile else "b2b_buyers",
                         status=SEOElementStatus.GENERATED
