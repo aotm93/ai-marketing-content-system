@@ -8,7 +8,7 @@ and executed by JobRunner.
 
 import logging
 import re
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from datetime import datetime
 
 from src.config import settings
