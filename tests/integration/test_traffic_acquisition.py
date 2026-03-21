@@ -30,6 +30,8 @@ from src.email.resend_client import ResendClient
 from src.email.sequence_engine import SequenceEngine
 from src.backlink.outreach_sender import OutreachSender
 from src.services.keyword_strategy import ContentAwareKeywordGenerator, KeywordCandidate
+from src.services.product_knowledge import CategoryInsight, ProductInsight
+from src.services.website_analyzer import WebsiteProfile
 
 # Create test database
 TEST_DATABASE_URL = "sqlite:///:memory:"
@@ -323,6 +325,61 @@ class TestKeywordStrategy:
         
         assert candidate.search_volume == 1000
         assert candidate.difficulty_score == 25
+
+    def test_content_aware_generator_includes_catalog_context(self):
+        """Generated keywords should carry category/product support metadata."""
+        profile = WebsiteProfile(
+            product_categories=["spray bottles"],
+            industry_terms=["wholesale", "PET", "cosmetic packaging"],
+            content_themes=["customization"],
+            target_audience="B2B wholesale buyers",
+            business_type="packaging supplier",
+            sample_keywords=["30ml pet spray bottle"],
+            customer_pain_points=["comparing MOQ and lead time"],
+            category_details=[
+                CategoryInsight(
+                    id=1,
+                    name="Spray Bottles",
+                    slug="spray-bottles",
+                    url="https://example.com/category/spray-bottles",
+                    product_count=12
+                )
+            ],
+            tag_details=[
+                CategoryInsight(id=11, name="PET", slug="pet", url="https://example.com/tag/pet", product_count=8),
+                CategoryInsight(id=12, name="Fine Mist", slug="fine-mist", url="https://example.com/tag/fine-mist", product_count=6),
+                CategoryInsight(id=13, name="Cosmetic Packaging", slug="cosmetic-packaging", url="https://example.com/tag/cosmetic-packaging", product_count=10),
+            ],
+            product_records=[
+                ProductInsight(
+                    id=1,
+                    name="Fine Mist Spray Bottle",
+                    slug="fine-mist-spray-bottle",
+                    url="https://example.com/product/fine-mist-spray-bottle",
+                    category_names=["Spray Bottles"],
+                    tag_names=["PET", "Fine Mist"],
+                    material="PET",
+                    capacity="30ml",
+                    closure_type="Fine Mist Spray",
+                    use_case="Cosmetic",
+                    moq="10000",
+                    lead_time="15-20 days",
+                    customization=["Logo"],
+                    certifications=["SGS"]
+                )
+            ]
+        )
+
+        generator = ContentAwareKeywordGenerator(profile)
+        candidates = generator.generate_keyword_pool(limit=10)
+
+        assert candidates
+        assert any(candidate.target_category == "Spray Bottles" for candidate in candidates)
+        assert any(candidate.target_tag for candidate in candidates)
+        assert any(candidate.route_target_type for candidate in candidates)
+        assert any(candidate.routing_score > 0.5 for candidate in candidates)
+        assert any(candidate.supporting_products for candidate in candidates)
+        assert any(candidate.decision_questions for candidate in candidates)
 
 
 class TestIntegrationWorkflow:

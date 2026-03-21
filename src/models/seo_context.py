@@ -87,6 +87,23 @@ class SEOContext(BaseModel):
     slug: Optional[str] = None
     categories: List[str] = Field(default_factory=lambda: ["Blog", "Guides"])
     tags: List[str] = Field(default_factory=list)
+
+    # ========== Catalog Context ==========
+    page_type: str = Field(default="category_support")
+    target_category_name: Optional[str] = None
+    target_category_slug: Optional[str] = None
+    target_category_url: Optional[str] = None
+    target_tag_name: Optional[str] = None
+    target_tag_slug: Optional[str] = None
+    target_tag_url: Optional[str] = None
+    primary_taxonomy_type: Optional[str] = None
+    primary_taxonomy_name: Optional[str] = None
+    primary_taxonomy_slug: Optional[str] = None
+    primary_taxonomy_url: Optional[str] = None
+    supporting_products: List[Dict[str, Any]] = Field(default_factory=list)
+    supporting_tags: List[str] = Field(default_factory=list)
+    decision_questions: List[str] = Field(default_factory=list)
+    commercial_facts: List[str] = Field(default_factory=list)
     
     # ========== Internal Linking (Strategy-based) ==========
     internal_links: List[InternalLinkOpportunity] = Field(default_factory=list)
@@ -285,8 +302,29 @@ class SEOContext(BaseModel):
                 "statistics": self.research_result.statistics if self.research_result else [],
                 "pain_points": [p.model_dump() for p in self.research_result.pain_points] if self.research_result else [],
             },
+            "page_type": self.page_type,
+            "category_context": {
+                "name": self.target_category_name,
+                "slug": self.target_category_slug,
+                "url": self.target_category_url,
+            },
+            "tag_context": {
+                "name": self.target_tag_name,
+                "slug": self.target_tag_slug,
+                "url": self.target_tag_url,
+            },
+            "primary_catalog_context": {
+                "type": self.primary_taxonomy_type,
+                "name": self.primary_taxonomy_name,
+                "slug": self.primary_taxonomy_slug,
+                "url": self.primary_taxonomy_url,
+            },
+            "decision_questions": self.decision_questions,
+            "commercial_facts": self.commercial_facts,
             "semantic_keywords": self.semantic_keywords,
             "internal_links": [link.model_dump() for link in self.internal_links],
+            "products": self.supporting_products,
+            "supporting_tags": self.supporting_tags,
         }
     
     def to_publishable_content(self) -> Dict[str, Any]:
@@ -300,7 +338,7 @@ class SEOContext(BaseModel):
             "seo_description": self.meta_description,
             "focus_keyword": self.target_keyword,
             "categories": self.categories,
-            "tags": self.tags,
+            "tags": self.tags or self.supporting_tags,
             "featured_image_data": self.featured_image_bytes,
             "featured_image_alt": self.featured_image_alt or self.selected_title,
         }

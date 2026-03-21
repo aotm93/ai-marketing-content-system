@@ -79,8 +79,27 @@ class TestHookOptimizerIntegration:
             value_score=0.78
         )
 
-        titles = optimizer.generate_optimized_titles_sync(topic, count=5)
+        titles = optimizer.generate_optimized_titles_sync(
+            topic,
+            count=5,
+            catalog_context={
+                "page_type": "wholesale_faq",
+                "target_category_name": "Plastic Bottles",
+                "supporting_products": [
+                    {
+                        "name": "500ml PET Plastic Bottle",
+                        "capacity": "500ml",
+                        "material": "PET",
+                        "closure_type": "Screw Cap",
+                    }
+                ],
+                "decision_questions": [
+                    "What MOQ, lead time, and certifications matter when choosing a plastic bottles wholesale supplier?"
+                ],
+            }
+        )
         best = next(title for title in titles if title.hook_type == HookType.DATA)
 
         assert "data-driven insights" not in best.title.lower()
         assert "plastic bottles wholesale supplier" in best.title.lower()
+        assert any(term in best.title.lower() for term in ["moq", "lead time", "certification", "buyer"])

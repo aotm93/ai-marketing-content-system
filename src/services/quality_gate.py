@@ -205,7 +205,9 @@ class EnhancedQualityGate:
         content_id: str,
         existing_content: Optional[List[Dict[str, Any]]] = None,
         target_keyword: Optional[str] = None,
-        components: Optional[List[str]] = None
+        components: Optional[List[str]] = None,
+        page_type: Optional[str] = None,
+        catalog_context: Optional[Dict[str, Any]] = None,
     ) -> QualityDiagnostic:
         """
         Run comprehensive quality diagnostic
@@ -272,12 +274,25 @@ class EnhancedQualityGate:
         )
         issues.extend(completeness_issues)
         scores["completeness"] = completeness_score
-        
+
+        # 7. Catalog / commercial alignment analysis
+        catalog_score = None
+        if page_type or catalog_context:
+            catalog_score, catalog_issues = self._analyze_catalog_alignment(
+                content=content,
+                text_content=text_content,
+                page_type=page_type or (catalog_context or {}).get("page_type"),
+                catalog_context=catalog_context or {},
+            )
+            issues.extend(catalog_issues)
+
         # Calculate overall score
         overall_score = sum(
             scores[k] * self.SCORE_WEIGHTS[k] 
             for k in self.SCORE_WEIGHTS.keys()
         )
+        if catalog_score is not None:
+            overall_score = (overall_score * 0.85) + (catalog_score * 0.15)
         
         # Determine grade
         grade = self._calculate_grade(overall_score)
@@ -303,7 +318,8 @@ class EnhancedQualityGate:
             "heading_count": len(re.findall(r'<h[1-6][>\s]', content, re.IGNORECASE)),
             "image_count": len(re.findall(r'<img', content, re.IGNORECASE)),
             "link_count": len(re.findall(r'<a\s', content, re.IGNORECASE)),
-            "component_scores": scores
+            "component_scores": scores,
+            "catalog_alignment_score": round(catalog_score, 1) if catalog_score is not None else None,
         }
         
         return QualityDiagnostic(
@@ -965,6 +981,207 @@ class EnhancedQualityGate:
             ))
         
         return max(0, score), issues
+
+    def _analyze_catalog_alignment(
+        self,
+        content: str,
+        text_content: str,
+        page_type: Optional[str],
+        catalog_context: Dict[str, Any],
+    ) -> Tuple[float, List[QualityIssue]]:
+        """Check whether content is commercially useful and connected to the catalog."""
+        issues: List[QualityIssue] = []
+        score = 100
+        content_lower = content.lower()
+        text_lower = text_content.lower()
+
+        target_category_name = catalog_context.get("target_category_name")
+        target_category_url = catalog_context.get("target_category_url")
+        target_tag_name = catalog_context.get("target_tag_name")
+        target_tag_url = catalog_context.get("target_tag_url")
+        supporting_products = catalog_context.get("supporting_products") or []
+        decision_questions = catalog_context.get("decision_questions") or []
+        commercial_facts = catalog_context.get("commercial_facts") or []
+
+        taxonomy_links = [
+            url.lower() for url in [target_category_url, target_tag_url]
+            if url
+        ]
+        has_taxonomy_link = any(url in content_lower for url in taxonomy_links)
+
+        if taxonomy_links and not has_taxonomy_link:
+            score -= 20
+            issues.append(QualityIssue(
+                issue_id="CAT-001",
+                category=IssueCategory.QUALITY,
+                severity=IssueSeverity.HIGH,
+                title="Missing taxonomy link",
+                description="Content does not link to the intended category or product tag page.",
+                location="Body content / CTA sections",
+                current_value="No category or tag URL detected",
+                expected_value="At least one natural link to the target category or tag landing page",
+                fix_recommendation="Add a natural internal link to the relevant category or tag page so readers can continue to browse closely matched catalog options.",
+                auto_fixable=False,
+                estimated_fix_time="5 min"
+            ))
+
+        taxonomy_names = [name.lower() for name in [target_category_name, target_tag_name] if name]
+        has_taxonomy_mention = any(name in text_lower for name in taxonomy_names)
+
+        if taxonomy_names and not has_taxonomy_mention:
+            score -= 8
+            issues.append(QualityIssue(
+                issue_id="CAT-002",
+                category=IssueCategory.QUALITY,
+                severity=IssueSeverity.MEDIUM,
+                title="Category/tag context not mentioned",
+                description="Neither the target category nor the target product tag is explicitly referenced in the article.",
+                location="Headings or CTA sections",
+                current_value="No category or tag mention detected",
+                expected_value="A target category or tag name should appear naturally in the article",
+                fix_recommendation="Reference the target category or tag by name when explaining available options, specifications, or next steps.",
+                auto_fixable=False,
+                estimated_fix_time="5 min"
+            ))
+
+        if supporting_products:
+            product_mentions = 0
+            product_links = 0
+            for product in supporting_products[:3]:
+                product_name = (product.get("name") or "").lower()
+                product_url = (product.get("url") or "").lower()
+                if product_name and product_name in text_lower:
+                    product_mentions += 1
+                if product_url and product_url in content_lower:
+                    product_links += 1
+
+            if product_mentions == 0:
+                score -= 18
+                issues.append(QualityIssue(
+                    issue_id="CAT-003",
+                    category=IssueCategory.QUALITY,
+                    severity=IssueSeverity.HIGH,
+                    title="No supporting product examples",
+                    description="Content does not mention any mapped supporting products.",
+                    location="Comparison / example sections",
+                    current_value="0 supporting products referenced",
+                    expected_value="At least 1 supporting product example",
+                    fix_recommendation="Include at least one concrete product example and explain why it fits the described use case.",
+                    auto_fixable=False,
+                    estimated_fix_time="10 min"
+                ))
+            if product_links == 0:
+                score -= 10
+                issues.append(QualityIssue(
+                    issue_id="CAT-004",
+                    category=IssueCategory.QUALITY,
+                    severity=IssueSeverity.MEDIUM,
+                    title="Supporting products are not linked",
+                    description="Product examples may be mentioned, but no product page links were detected.",
+                    location="Example / next-step sections",
+                    current_value="0 product page links",
+                    expected_value="1+ linked product examples",
+                    fix_recommendation="Link one or more supporting product pages where the article cites concrete examples.",
+                    auto_fixable=False,
+                    estimated_fix_time="5 min"
+                ))
+
+        if decision_questions:
+            answered = 0
+            for question in decision_questions[:5]:
+                keywords = [token for token in re.findall(r"[a-zA-Z]{4,}", question.lower()) if token not in {"which", "what", "before", "apply", "should"}]
+                if keywords and any(keyword in text_lower for keyword in keywords[:3]):
+                    answered += 1
+            coverage = answered / max(1, min(len(decision_questions), 5))
+            if coverage < 0.4:
+                score -= 15
+                issues.append(QualityIssue(
+                    issue_id="CAT-005",
+                    category=IssueCategory.QUALITY,
+                    severity=IssueSeverity.HIGH,
+                    title="Decision questions are not clearly answered",
+                    description="The article does not appear to address enough of the mapped buyer decision questions.",
+                    location="Main body sections",
+                    current_value=f"{answered}/{min(len(decision_questions), 5)} questions covered",
+                    expected_value="At least 40% of decision questions addressed explicitly",
+                    fix_recommendation="Add sections or subsections that directly answer the mapped buyer decision questions, especially around selection criteria and sourcing trade-offs.",
+                    auto_fixable=False,
+                    estimated_fix_time="15 min"
+                ))
+
+        commercial_signal_count = self._count_commercial_signals(text_lower)
+        required_signal_thresholds = {
+            "category_support": 2,
+            "product_selection": 3,
+            "spec_comparison": 3,
+            "wholesale_faq": 4,
+        }
+        required_signals = required_signal_thresholds.get(page_type or "", 2)
+        if commercial_signal_count < required_signals:
+            score -= 15
+            issues.append(QualityIssue(
+                issue_id="CAT-006",
+                category=IssueCategory.QUALITY,
+                severity=IssueSeverity.HIGH,
+                title="Not enough commercial buying signals",
+                description="The article reads too generically and lacks enough sourcing or specification anchors.",
+                location="Main body",
+                current_value=f"{commercial_signal_count} commercial signals",
+                expected_value=f"{required_signals}+ commercial signals",
+                fix_recommendation="Add concrete sourcing details such as MOQ, lead time, sample policy, material, capacity, closure compatibility, certifications, or customization options.",
+                auto_fixable=False,
+                estimated_fix_time="15 min"
+            ))
+
+        if page_type in {"product_selection", "spec_comparison"} and "<table" not in content_lower:
+            score -= 18
+            issues.append(QualityIssue(
+                issue_id="CAT-007",
+                category=IssueCategory.STRUCTURE,
+                severity=IssueSeverity.HIGH,
+                title="Missing comparison table",
+                description="This page type should include a comparison or specification table.",
+                location="Middle of article",
+                current_value="No HTML table detected",
+                expected_value="At least one HTML table",
+                fix_recommendation="Add an HTML comparison table covering specs, fit, trade-offs, or supplier criteria.",
+                auto_fixable=False,
+                estimated_fix_time="10 min"
+            ))
+
+        if page_type == "wholesale_faq" and "faq" not in text_lower:
+            score -= 12
+            issues.append(QualityIssue(
+                issue_id="CAT-008",
+                category=IssueCategory.STRUCTURE,
+                severity=IssueSeverity.MEDIUM,
+                title="Wholesale FAQ page missing FAQ section",
+                description="Wholesale FAQ content should include a visible FAQ section.",
+                location="End of article",
+                current_value="No FAQ heading detected",
+                expected_value="FAQ section with buyer questions",
+                fix_recommendation="Add an FAQ section covering MOQ, lead time, samples, customization, packaging, and shipping questions.",
+                auto_fixable=False,
+                estimated_fix_time="10 min"
+            ))
+
+        if commercial_facts and commercial_signal_count < 2:
+            score -= 10
+            issues.append(QualityIssue(
+                issue_id="CAT-009",
+                category=IssueCategory.QUALITY,
+                severity=IssueSeverity.MEDIUM,
+                title="Commercial facts were not reflected in the copy",
+                description="Mapped commercial facts exist, but the body copy does not show enough factual buying detail.",
+                location="Main body",
+                current_value="Low factual buying detail",
+                expected_value="Commercial facts reflected in sourcing guidance",
+                fix_recommendation="Weave the mapped commercial facts into spec, procurement, or comparison sections instead of generic commentary.",
+                auto_fixable=False,
+                estimated_fix_time="10 min"
+            ))
+
+        return max(0, score), issues
     
     # ==================== Utility Methods ====================
     
@@ -973,6 +1190,15 @@ class EnhancedQualityGate:
         text = re.sub(r'<[^>]+>', ' ', html)
         text = re.sub(r'\s+', ' ', text)
         return text.strip()
+
+    def _count_commercial_signals(self, text_lower: str) -> int:
+        """Count distinct commercial / sourcing signals present in the body copy."""
+        signals = [
+            "moq", "lead time", "sample", "custom", "customization", "logo",
+            "material", "capacity", "closure", "neck finish", "certification",
+            "sgs", "fda", "iso", "printing", "packaging", "shipping", "quote"
+        ]
+        return sum(1 for signal in signals if signal in text_lower)
     
     def _calculate_grade(self, score: float) -> str:
         """Calculate letter grade from score"""

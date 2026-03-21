@@ -216,6 +216,26 @@ class WordPressClient:
             
         return await self._request("GET", "posts", params=params)
 
+    async def get_content_items(
+        self,
+        content_type: str,
+        per_page: int = 10,
+        page: int = 1,
+        status: Optional[str] = None,
+        search: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """Get entries from an arbitrary REST content endpoint."""
+        params = {"per_page": per_page, "page": page}
+        if status:
+            params["status"] = status
+        if search:
+            params["search"] = search
+        return await self._request("GET", content_type, params=params)
+
+    async def get_post_types(self) -> Dict[str, Any]:
+        """Fetch registered REST types available under wp/v2."""
+        return await self._request("GET", "types")
+
     async def get_simple_posts_for_linking(self, limit: int = 20) -> List[Dict[str, str]]:
         """
         Get simplified list of recent posts for internal linking context.
@@ -294,6 +314,18 @@ class WordPressClient:
     async def get_categories(self, per_page: int = 100) -> List[Dict[str, Any]]:
         """Get all categories"""
         return await self._request("GET", "categories", params={"per_page": per_page})
+
+    async def get_taxonomy_terms(
+        self,
+        taxonomy: str,
+        per_page: int = 100,
+        search: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """Get arbitrary taxonomy terms such as product_cat or product_tag."""
+        params: Dict[str, Any] = {"per_page": per_page}
+        if search:
+            params["search"] = search
+        return await self._request("GET", taxonomy, params=params)
     
     async def create_category(
         self,

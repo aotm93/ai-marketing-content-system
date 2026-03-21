@@ -30,7 +30,10 @@ class TestHookOptimizer:
             target_audience="operations_managers",
             business_intent=0.75,
             trend_score=0.7,
+            competition_score=0.5,
             differentiation_score=0.8,
+            brand_alignment_score=0.7,
+            value_score=0.7,
             research_result=None
         )
     
@@ -101,7 +104,10 @@ class TestHookOptimizer:
             target_audience="b2b",
             business_intent=0.8,
             trend_score=0.8,
+            competition_score=0.45,
             differentiation_score=0.7,
+            brand_alignment_score=0.75,
+            value_score=0.8,
             research_result=ResearchResult(
                 statistics=[
                     {"value": 67, "subject": "companies", "metric": "savings", "impact_score": 0.9}
@@ -131,7 +137,10 @@ class TestHookOptimizer:
             target_audience="b2b",
             business_intent=0.7,
             trend_score=0.6,
+            competition_score=0.5,
             differentiation_score=0.6,
+            brand_alignment_score=0.7,
+            value_score=0.68,
             research_result=ResearchResult(
                 pain_points=[
                     PainPoint(
@@ -164,7 +173,10 @@ class TestHookOptimizer:
             target_audience="b2b",
             business_intent=0.95,
             trend_score=0.9,
+            competition_score=0.25,
             differentiation_score=0.9,
+            brand_alignment_score=0.9,
+            value_score=0.95,
             research_result=ResearchResult(
                 statistics=[{"value": 85}],
                 pain_points=[PainPoint(description="Test", category="Test", severity=0.9, frequency="common")],
@@ -181,7 +193,10 @@ class TestHookOptimizer:
             target_audience="b2b",
             business_intent=0.3,
             trend_score=0.3,
+            competition_score=0.8,
             differentiation_score=0.2,
+            brand_alignment_score=0.4,
+            value_score=0.25,
             research_result=None
         )
         
@@ -259,3 +274,45 @@ class TestHookOptimizer:
             # Title should be non-empty and reasonable length
             assert len(title.title) > 10
             assert len(title.title) < 200
+
+    @pytest.mark.asyncio
+    async def test_catalog_context_generates_commercial_titles(self, optimizer):
+        """Catalog context should push titles toward supplier/buyer specifics."""
+        topic = ContentTopic(
+            title="30ml pet spray bottle wholesale",
+            angle="buyer selection",
+            hook_type=HookType.HOW_TO,
+            industry="packaging",
+            target_audience="b2b buyers",
+            business_intent=0.9,
+            trend_score=0.6,
+            competition_score=0.4,
+            differentiation_score=0.8,
+            brand_alignment_score=0.8,
+            value_score=0.8
+        )
+
+        titles = await optimizer.generate_optimized_titles(
+            topic,
+            count=4,
+            catalog_context={
+                "page_type": "wholesale_faq",
+                "target_category_name": "Spray Bottles",
+                "supporting_products": [
+                    {
+                        "name": "30ml PET Fine Mist Spray Bottle",
+                        "capacity": "30ml",
+                        "material": "PET",
+                        "closure_type": "Fine Mist Spray",
+                    }
+                ],
+                "decision_questions": [
+                    "What MOQ and lead time apply to spray bottle sourcing?",
+                    "Which supplier questions should buyers ask before sampling?"
+                ],
+            }
+        )
+
+        assert any("moq" in title.title.lower() for title in titles)
+        assert any("lead time" in title.title.lower() for title in titles)
+        assert all("30ml pet spray bottle wholesale" in title.title.lower() for title in titles)

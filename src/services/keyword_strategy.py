@@ -15,6 +15,8 @@ from typing import List, Dict, Any, Set, Optional
 from dataclasses import dataclass, field
 from enum import Enum
 
+from src.services.product_knowledge import ProductCatalogMatcher
+
 logger = logging.getLogger(__name__)
 
 
@@ -43,6 +45,27 @@ class KeywordCandidate:
     difficulty_estimate: str  # low, medium, high
     is_long_tail: bool
     semantic_group: str  # For avoiding cannibalization
+    page_type: str = "category_support"
+    target_category: Optional[str] = None
+    target_category_url: Optional[str] = None
+    target_category_slug: Optional[str] = None
+    target_tag: Optional[str] = None
+    target_tag_url: Optional[str] = None
+    target_tag_slug: Optional[str] = None
+    primary_taxonomy_type: Optional[str] = None
+    primary_taxonomy_name: Optional[str] = None
+    primary_taxonomy_slug: Optional[str] = None
+    primary_taxonomy_url: Optional[str] = None
+    route_target_type: Optional[str] = None
+    route_target_name: Optional[str] = None
+    route_target_url: Optional[str] = None
+    supporting_products: List[Dict[str, Any]] = field(default_factory=list)
+    supporting_tags: List[str] = field(default_factory=list)
+    decision_questions: List[str] = field(default_factory=list)
+    commercial_facts: List[str] = field(default_factory=list)
+    commercial_score: float = 0.0
+    routing_score: float = 0.0
+    required_sections: List[str] = field(default_factory=list)
     # Real data from API (optional, populated when API is available)
     search_volume: Optional[int] = None
     difficulty_score: Optional[int] = None  # 0-100 numeric score
@@ -62,6 +85,7 @@ class ContentAwareKeywordGenerator:
             website_profile: WebsiteProfile from website analyzer (optional)
         """
         self.website_profile = website_profile
+        self.catalog_matcher = ProductCatalogMatcher()
         logger.info("ContentAwareKeywordGenerator initialized")
 
     def set_website_profile(self, profile):
@@ -107,17 +131,31 @@ class ContentAwareKeywordGenerator:
 
         keywords = []
 
+        if getattr(self.website_profile, "category_details", None) or getattr(self.website_profile, "product_records", None):
+            catalog_keywords = self._generate_catalog_keywords(limit=max(limit // 2, 12))
+            keywords.extend(catalog_keywords)
+
         # Generate keywords for each journey stage
         for stage, stage_ratio in journey_mix.items():
             stage_limit = int(limit * stage_ratio)
             stage_keywords = self._generate_stage_keywords(stage, stage_limit, intent_mix)
             keywords.extend(stage_keywords)
 
+        keywords = self._deduplicate_candidates(keywords)
+
         # Enrich with real search volume data from API
         keywords = self._enrich_with_api_data(keywords)
 
-        # Sort by search volume (descending) if available
-        keywords.sort(key=lambda k: (k.search_volume or 0), reverse=True)
+        # Sort by routing value first so selected topics map cleanly to landing pages.
+        keywords.sort(
+            key=lambda k: (
+                k.routing_score,
+                k.commercial_score,
+                k.search_volume or 0,
+                1 if k.is_long_tail else 0,
+            ),
+            reverse=True,
+        )
 
         logger.info(f"Generated {len(keywords)} content-aware keywords")
         return keywords[:limit]
@@ -221,6 +259,322 @@ class ContentAwareKeywordGenerator:
         }
         return mapping.get(estimate.lower(), 50)
 
+    def _generate_catalog_keywords(self, limit: int) -> List[KeywordCandidate]:
+        """Generate product/category-backed topics with direct commercial context."""
+        profile = self.website_profile
+        categories = getattr(profile, "category_details", [])[:6]
+        tags = getattr(profile, "tag_details", [])[:6]
+        products = getattr(profile, "product_records", [])[:10]
+
+        candidates: List[KeywordCandidate] = []
+
+        for category in categories:
+            category_name = category.name
+            candidates.extend([
+                self._build_candidate(
+                    keyword=f"{category_name} wholesale",
+                    intent=SearchIntent.TRANSACTIONAL,
+                    journey_stage=CustomerJourneyStage.DECISION,
+                    category=category_name,
+                    semantic_group=f"catalog_{category.slug or category_name}",
+                ),
+                self._build_candidate(
+                    keyword=f"{category_name} supplier",
+                    intent=SearchIntent.COMMERCIAL,
+                    journey_stage=CustomerJourneyStage.CONSIDERATION,
+                    category=category_name,
+                    semantic_group=f"catalog_{category.slug or category_name}",
+                ),
+                self._build_candidate(
+                    keyword=f"{category_name} MOQ and lead time",
+                    intent=SearchIntent.TRANSACTIONAL,
+                    journey_stage=CustomerJourneyStage.DECISION,
+                    category=category_name,
+                    semantic_group=f"catalog_ops_{category.slug or category_name}",
+                ),
+            ])
+            if len(candidates) >= limit:
+                break
+
+        for product in products:
+            descriptor = self._build_product_keyword_descriptor(product)
+            if not descriptor:
+                continue
+
+            candidates.extend([
+                self._build_candidate(
+                    keyword=f"{descriptor} wholesale",
+                    intent=SearchIntent.TRANSACTIONAL,
+                    journey_stage=CustomerJourneyStage.DECISION,
+                    category=product.category_names[0] if product.category_names else "product",
+                    semantic_group=f"product_{product.slug or descriptor}",
+                ),
+                self._build_candidate(
+                    keyword=f"{descriptor} supplier MOQ",
+                    intent=SearchIntent.TRANSACTIONAL,
+                    journey_stage=CustomerJourneyStage.DECISION,
+                    category=product.category_names[0] if product.category_names else "product",
+                    semantic_group=f"product_ops_{product.slug or descriptor}",
+                ),
+            ])
+            if product.use_case:
+                candidates.append(
+                    self._build_candidate(
+                        keyword=f"{descriptor} for {product.use_case.lower()}",
+                        intent=SearchIntent.COMMERCIAL,
+                        journey_stage=CustomerJourneyStage.CONSIDERATION,
+                        category=product.category_names[0] if product.category_names else "product",
+                        semantic_group=f"use_case_{product.slug or descriptor}",
+                    )
+                )
+
+            if len(candidates) >= limit:
+                break
+
+        for tag in tags:
+            tag_name = getattr(tag, "name", str(tag))
+            tag_slug = getattr(tag, "slug", tag_name)
+            if not tag_name:
+                continue
+
+            candidates.extend([
+                self._build_candidate(
+                    keyword=f"{tag_name} packaging wholesale",
+                    intent=SearchIntent.COMMERCIAL,
+                    journey_stage=CustomerJourneyStage.CONSIDERATION,
+                    category=tag_name,
+                    semantic_group=f"tag_{tag_slug}",
+                ),
+                self._build_candidate(
+                    keyword=f"{tag_name} bottle supplier",
+                    intent=SearchIntent.TRANSACTIONAL,
+                    journey_stage=CustomerJourneyStage.DECISION,
+                    category=tag_name,
+                    semantic_group=f"tag_ops_{tag_slug}",
+                ),
+            ])
+            if len(candidates) >= limit:
+                break
+
+        return self._deduplicate_candidates(candidates)[:limit]
+
+    def _build_candidate(
+        self,
+        keyword: str,
+        intent: SearchIntent,
+        journey_stage: CustomerJourneyStage,
+        category: str,
+        semantic_group: str,
+    ) -> KeywordCandidate:
+        """Build a keyword candidate enriched with category/product context."""
+        catalog_match = self.catalog_matcher.match_topic(
+            keyword,
+            getattr(self.website_profile, "category_details", []),
+            getattr(self.website_profile, "product_records", []),
+            getattr(self.website_profile, "tag_details", []),
+        )
+
+        commercial_score = min(
+            1.0,
+            0.35
+            + (0.15 if (catalog_match.target_category_name or catalog_match.target_tag_name) else 0)
+            + min(len(catalog_match.supporting_products), 3) * 0.12
+            + min(len(catalog_match.commercial_facts), 4) * 0.08,
+        )
+        route_target_type, route_target_name, route_target_url = self._infer_route_target(keyword, catalog_match)
+        routing_score = self._score_routing_priority(catalog_match, route_target_type, keyword)
+
+        return KeywordCandidate(
+            keyword=keyword,
+            intent=intent,
+            journey_stage=journey_stage,
+            category=category,
+            difficulty_estimate="low" if len(keyword.split()) >= 4 else "medium",
+            is_long_tail=len(keyword.split()) >= 4,
+            semantic_group=semantic_group,
+            page_type=catalog_match.page_type,
+            target_category=catalog_match.target_category_name,
+            target_category_url=catalog_match.target_category_url,
+            target_category_slug=catalog_match.target_category_slug,
+            target_tag=catalog_match.target_tag_name,
+            target_tag_url=catalog_match.target_tag_url,
+            target_tag_slug=catalog_match.target_tag_slug,
+            primary_taxonomy_type=catalog_match.primary_taxonomy_type,
+            primary_taxonomy_name=catalog_match.primary_taxonomy_name,
+            primary_taxonomy_slug=catalog_match.primary_taxonomy_slug,
+            primary_taxonomy_url=catalog_match.primary_taxonomy_url,
+            route_target_type=route_target_type,
+            route_target_name=route_target_name,
+            route_target_url=route_target_url,
+            supporting_products=catalog_match.supporting_products,
+            supporting_tags=catalog_match.supporting_tags,
+            decision_questions=catalog_match.decision_questions,
+            commercial_facts=catalog_match.commercial_facts,
+            commercial_score=round(commercial_score, 2),
+            routing_score=round(routing_score, 2),
+            required_sections=self._default_required_sections(catalog_match.page_type),
+        )
+
+    def _infer_route_target(self, keyword: str, catalog_match) -> tuple[Optional[str], Optional[str], Optional[str]]:
+        """Pick the most natural landing page for the article CTA path."""
+        supporting_products = catalog_match.supporting_products or []
+        if self._is_product_led_keyword(keyword, supporting_products):
+            product = supporting_products[0]
+            return "product", product.get("name"), product.get("url")
+
+        if catalog_match.primary_taxonomy_name:
+            return (
+                catalog_match.primary_taxonomy_type,
+                catalog_match.primary_taxonomy_name,
+                catalog_match.primary_taxonomy_url,
+            )
+
+        if supporting_products:
+            product = supporting_products[0]
+            return "product", product.get("name"), product.get("url")
+
+        return None, None, None
+
+    def _is_product_led_keyword(self, keyword: str, supporting_products: List[Dict[str, Any]]) -> bool:
+        """Detect product-specific queries that should land on a product page first."""
+        if not keyword or not supporting_products:
+            return False
+
+        keyword_lower = keyword.lower()
+        if any(term in keyword_lower for term in ["sku", "part number", "30ml", "50ml", "100ml"]):
+            return True
+
+        product = supporting_products[0]
+        product_name = (product.get("name") or "").lower()
+        if product_name and product_name in keyword_lower:
+            return True
+
+        product_terms = [
+            str(product.get("capacity", "")).lower(),
+            str(product.get("material", "")).lower(),
+            str(product.get("closure_type", "")).lower(),
+        ]
+        matched_terms = [term for term in product_terms if term and term in keyword_lower]
+        return len(matched_terms) >= 2
+
+    def _score_routing_priority(self, catalog_match, route_target_type: Optional[str], keyword: str) -> float:
+        """Reward topics that route cleanly into catalog landing pages."""
+        score = 0.2
+        if catalog_match.primary_taxonomy_type == "tag":
+            score += 0.26
+        elif catalog_match.primary_taxonomy_type == "category":
+            score += 0.22
+
+        if route_target_type == "product":
+            score += 0.28
+
+        if catalog_match.primary_taxonomy_url:
+            score += 0.08
+        if catalog_match.supporting_products:
+            score += min(len(catalog_match.supporting_products), 3) * 0.06
+        if catalog_match.decision_questions:
+            score += min(len(catalog_match.decision_questions), 4) * 0.04
+        if catalog_match.commercial_facts:
+            score += min(len(catalog_match.commercial_facts), 4) * 0.025
+        if len(keyword.split()) >= 4:
+            score += 0.04
+        return min(score, 1.0)
+
+    def _build_product_keyword_descriptor(self, product) -> str:
+        """Create a readable product-led keyword descriptor."""
+        parts = [product.capacity, product.material, product.name]
+        descriptor = " ".join(part for part in parts if part).strip()
+        return descriptor[:120]
+
+    def _default_required_sections(self, page_type: str) -> List[str]:
+        """Map page types to required content sections."""
+        mapping = {
+            "category_support": ["summary", "selection_criteria", "faq"],
+            "product_selection": ["summary", "comparison_table", "buyer_checklist", "faq"],
+            "spec_comparison": ["summary", "comparison_table", "trade_offs", "faq"],
+            "wholesale_faq": ["summary", "moq_and_lead_time", "customization", "faq"],
+        }
+        return mapping.get(page_type, ["summary", "faq"])
+
+    def _deduplicate_candidates(self, candidates: List[KeywordCandidate]) -> List[KeywordCandidate]:
+        """Deduplicate keyword candidates by normalized keyword."""
+        seen = set()
+        deduped = []
+        for candidate in candidates:
+            normalized = candidate.keyword.lower().strip()
+            if normalized in seen:
+                continue
+            seen.add(normalized)
+            deduped.append(candidate)
+        return deduped
+
+    def infer_route_counts_from_keywords(self, keywords: List[str]) -> Dict[str, int]:
+        """Estimate how today's published keywords are distributed across route types."""
+        counts = {"category": 0, "tag": 0, "product": 0}
+        if not self.website_profile:
+            return counts
+
+        for keyword in keywords or []:
+            match = self.catalog_matcher.match_topic(
+                keyword,
+                getattr(self.website_profile, "category_details", []),
+                getattr(self.website_profile, "product_records", []),
+                getattr(self.website_profile, "tag_details", []),
+            )
+            route_type, _, _ = self._infer_route_target(keyword, match)
+            if route_type in counts:
+                counts[route_type] += 1
+        return counts
+
+    def balance_route_coverage(
+        self,
+        candidates: List[KeywordCandidate],
+        selected_keywords: List[str],
+        recent_keywords_7d: Optional[List[str]] = None,
+    ) -> List[KeywordCandidate]:
+        """Boost underrepresented route types so the site distributes internal traffic more evenly."""
+        if not candidates:
+            return candidates
+
+        route_counts_today = self.infer_route_counts_from_keywords(selected_keywords)
+        route_counts_week = self.infer_route_counts_from_keywords(recent_keywords_7d or selected_keywords)
+
+        for candidate in candidates:
+            route_type = candidate.route_target_type or candidate.primary_taxonomy_type or "category"
+            boost = self._route_balance_boost(route_type, route_counts_today, strong=0.12, light=0.06)
+            boost += self._route_balance_boost(route_type, route_counts_week, strong=0.1, light=0.05)
+            candidate.routing_score = round(min(1.0, candidate.routing_score + boost), 2)
+
+        candidates.sort(
+            key=lambda k: (
+                k.routing_score,
+                k.commercial_score,
+                k.search_volume or 0,
+                1 if k.is_long_tail else 0,
+            ),
+            reverse=True,
+        )
+        return candidates
+
+    def _route_balance_boost(
+        self,
+        route_type: str,
+        route_counts: Dict[str, int],
+        strong: float,
+        light: float,
+    ) -> float:
+        """Return a boost when a route type is underrepresented in a given time window."""
+        if not route_counts:
+            return 0.0
+
+        least_count = min(route_counts.values())
+        route_count = route_counts.get(route_type, 0)
+        if route_count == least_count:
+            return strong
+        if route_count == least_count + 1:
+            return light
+        return 0.0
+
     def _generate_stage_keywords(
         self,
         stage: CustomerJourneyStage,
@@ -278,13 +632,11 @@ class ContentAwareKeywordGenerator:
                 if "{theme}" in template and themes:
                     keyword = keyword.replace("{theme}", themes[0])
 
-                keywords.append(KeywordCandidate(
+                keywords.append(self._build_candidate(
                     keyword=keyword,
                     intent=SearchIntent.INFORMATIONAL,
                     journey_stage=CustomerJourneyStage.AWARENESS,
                     category=category,
-                    difficulty_estimate="low" if len(keyword.split()) >= 4 else "medium",
-                    is_long_tail=len(keyword.split()) >= 4,
                     semantic_group=f"awareness_{category}"
                 ))
 
@@ -331,13 +683,11 @@ class ContentAwareKeywordGenerator:
                 if "{industry_term}" in template and industry_terms:
                     keyword = keyword.replace("{industry_term}", industry_terms[0])
 
-                keywords.append(KeywordCandidate(
+                keywords.append(self._build_candidate(
                     keyword=keyword,
                     intent=SearchIntent.COMMERCIAL,
                     journey_stage=CustomerJourneyStage.CONSIDERATION,
                     category=category,
-                    difficulty_estimate="low" if len(keyword.split()) >= 4 else "medium",
-                    is_long_tail=len(keyword.split()) >= 4,
                     semantic_group=f"consideration_{category}"
                 ))
 
@@ -384,13 +734,11 @@ class ContentAwareKeywordGenerator:
                 if "{industry_term}" in template and industry_terms:
                     keyword = keyword.replace("{industry_term}", industry_terms[0])
 
-                keywords.append(KeywordCandidate(
+                keywords.append(self._build_candidate(
                     keyword=keyword,
                     intent=SearchIntent.TRANSACTIONAL,
                     journey_stage=CustomerJourneyStage.DECISION,
                     category=category,
-                    difficulty_estimate="medium",
-                    is_long_tail=len(keyword.split()) >= 4,
                     semantic_group=f"decision_{category}"
                 ))
 
@@ -415,7 +763,10 @@ class ContentAwareKeywordGenerator:
                 category="general",
                 difficulty_estimate="medium",
                 is_long_tail=len(kw.split()) >= 4,
-                semantic_group="default"
+                semantic_group="default",
+                page_type="wholesale_faq",
+                commercial_score=0.4,
+                required_sections=self._default_required_sections("wholesale_faq"),
             ))
 
         return keywords

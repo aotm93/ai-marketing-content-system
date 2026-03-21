@@ -7,7 +7,8 @@ and executed by JobRunner.
 """
 
 import logging
-from typing import Dict, Any
+import re
+from typing import Dict, Any, Optional
 from datetime import datetime
 
 from src.config import settings
@@ -247,6 +248,591 @@ async def _generate_emergency_topic(website_profile=None) -> str:
     return topic
 
 
+def _match_catalog_context(keyword: str, website_profile) -> Dict[str, Any]:
+    """Map a topic or keyword to category/product support from the website profile."""
+    if not website_profile:
+        return {}
+
+    try:
+        from src.services.product_knowledge import ProductCatalogMatcher
+
+        matcher = ProductCatalogMatcher()
+        match = matcher.match_topic(
+            keyword,
+            getattr(website_profile, "category_details", []),
+            getattr(website_profile, "product_records", []),
+            getattr(website_profile, "tag_details", []),
+        )
+        return {
+            "page_type": match.page_type,
+            "target_category_name": match.target_category_name,
+            "target_category_slug": match.target_category_slug,
+            "target_category_url": match.target_category_url,
+            "target_tag_name": match.target_tag_name,
+            "target_tag_slug": match.target_tag_slug,
+            "target_tag_url": match.target_tag_url,
+            "primary_taxonomy_type": match.primary_taxonomy_type,
+            "primary_taxonomy_name": match.primary_taxonomy_name,
+            "primary_taxonomy_slug": match.primary_taxonomy_slug,
+            "primary_taxonomy_url": match.primary_taxonomy_url,
+            "supporting_products": match.supporting_products,
+            "supporting_tags": match.supporting_tags,
+            "decision_questions": match.decision_questions,
+            "commercial_facts": match.commercial_facts,
+        }
+    except Exception as exc:
+        logger.debug(f"Catalog matching failed for '{keyword}': {exc}")
+        return {}
+
+
+def _apply_catalog_context_to_seo_context(seo_context, catalog_context: Dict[str, Any]) -> None:
+    """Merge product/category support data into SEOContext."""
+    if not seo_context or not catalog_context:
+        return
+
+    seo_context.page_type = catalog_context.get("page_type") or seo_context.page_type
+    seo_context.target_category_name = catalog_context.get("target_category_name")
+    seo_context.target_category_slug = catalog_context.get("target_category_slug")
+    seo_context.target_category_url = catalog_context.get("target_category_url")
+    seo_context.target_tag_name = catalog_context.get("target_tag_name")
+    seo_context.target_tag_slug = catalog_context.get("target_tag_slug")
+    seo_context.target_tag_url = catalog_context.get("target_tag_url")
+    seo_context.primary_taxonomy_type = catalog_context.get("primary_taxonomy_type")
+    seo_context.primary_taxonomy_name = catalog_context.get("primary_taxonomy_name")
+    seo_context.primary_taxonomy_slug = catalog_context.get("primary_taxonomy_slug")
+    seo_context.primary_taxonomy_url = catalog_context.get("primary_taxonomy_url")
+    seo_context.supporting_products = catalog_context.get("supporting_products", [])
+    seo_context.supporting_tags = catalog_context.get("supporting_tags", [])
+    seo_context.decision_questions = catalog_context.get("decision_questions", [])
+    seo_context.commercial_facts = catalog_context.get("commercial_facts", [])
+
+    if seo_context.supporting_tags:
+        seo_context.tags = list(dict.fromkeys(seo_context.tags + seo_context.supporting_tags[:6]))
+
+
+def _add_catalog_links(seo_context) -> None:
+    """Create internal link opportunities for category, tag, and product pages."""
+    if not seo_context:
+        return
+
+    from src.models.seo_context import InternalLinkOpportunity
+
+    existing_targets = {link.target_url for link in seo_context.internal_links}
+
+    if seo_context.target_category_url and seo_context.target_category_url not in existing_targets:
+        seo_context.internal_links.append(
+            InternalLinkOpportunity(
+                target_url=seo_context.target_category_url,
+                target_title=seo_context.target_category_name or "Related category",
+                anchor_text_suggestions=[
+                    seo_context.target_category_name or "related category",
+                    f"{seo_context.target_category_name} options" if seo_context.target_category_name else "browse options",
+                ],
+                relevance_score=0.95,
+                context_paragraph="Use this link when directing readers to browse the relevant category.",
+            )
+        )
+        existing_targets.add(seo_context.target_category_url)
+
+    if seo_context.target_tag_url and seo_context.target_tag_url not in existing_targets:
+        seo_context.internal_links.append(
+            InternalLinkOpportunity(
+                target_url=seo_context.target_tag_url,
+                target_title=seo_context.target_tag_name or "Related tag collection",
+                anchor_text_suggestions=[
+                    seo_context.target_tag_name or "related packaging tag",
+                    f"{seo_context.target_tag_name} options" if seo_context.target_tag_name else "browse related tag options",
+                ],
+                relevance_score=0.93,
+                context_paragraph="Use this link when guiding readers to a narrower attribute, material, or application collection.",
+            )
+        )
+        existing_targets.add(seo_context.target_tag_url)
+
+    for product in seo_context.supporting_products[:3]:
+        product_url = product.get("url")
+        product_name = product.get("name")
+        if not product_url or not product_name or product_url in existing_targets:
+            continue
+
+        anchor_suggestions = [product_name]
+        if product.get("capacity"):
+            anchor_suggestions.append(f"{product.get('capacity')} {product_name}")
+
+        seo_context.internal_links.append(
+            InternalLinkOpportunity(
+                target_url=product_url,
+                target_title=product_name,
+                anchor_text_suggestions=anchor_suggestions[:2],
+                relevance_score=0.9,
+                context_paragraph="Use this link when citing a concrete product example or next-step option.",
+            )
+        )
+        existing_targets.add(product_url)
+
+
+def _infer_content_components(content: str, seo_context=None) -> List[str]:
+    """Infer which structural/content components are present in generated HTML."""
+    content_lower = (content or "").lower()
+    components = []
+
+    if "<h1" in content_lower or "<p" in content_lower:
+        components.append("summary")
+    if "faq" in content_lower:
+        components.append("faq")
+    if "<table" in content_lower:
+        components.append("table")
+        if any(term in content_lower for term in ["compare", "comparison", "vs", "trade-off"]):
+            components.append("comparison_table")
+    if any(term in content_lower for term in ["checklist", "buyer checklist", "shortlist"]):
+        components.append("buyer_checklist")
+    if "custom" in content_lower or "logo" in content_lower:
+        components.append("customization")
+    if "moq" in content_lower or "lead time" in content_lower:
+        components.append("moq_and_lead_time")
+    if any(term in content_lower for term in ["trade-off", "not recommended", "best fit"]):
+        components.append("trade_offs")
+
+    if seo_context and getattr(seo_context, "page_type", None) == "wholesale_faq" and "faq" not in components:
+        # The page type expects FAQ even if the heading wording is slightly different.
+        if any(term in content_lower for term in ["question", "answer", "what buyers ask"]):
+            components.append("faq")
+
+    return list(dict.fromkeys(components))
+
+
+def _ensure_catalog_outline(seo_context) -> None:
+    """Backfill a buyer-led outline so generated articles get consistent H2/FAQ/CTA guidance."""
+    if not seo_context or seo_context.outline:
+        return
+
+    try:
+        from src.models.content_intelligence import ContentOutline, OutlineSection, ContentType, HookType
+
+        primary_name = (
+            seo_context.primary_taxonomy_name
+            or seo_context.target_tag_name
+            or seo_context.target_category_name
+            or "catalog options"
+        )
+        keyword = seo_context.target_keyword or seo_context.topic_title or primary_name
+        decision_questions = list(seo_context.decision_questions[:4])
+        products = seo_context.supporting_products[:2]
+
+        sections = [
+            OutlineSection(
+                title=f"How buyers shortlist {primary_name}",
+                content_type=ContentType.SOLUTION,
+                key_points=[
+                    f"Explain which {primary_name} options fit different filling, branding, and compliance needs",
+                    "Open with a direct buyer answer instead of a generic introduction",
+                    "Clarify what buyers should confirm before requesting quotes or samples",
+                ],
+                estimated_word_count=360,
+                order=0,
+            ),
+            OutlineSection(
+                title=f"MOQ, lead time, and sample checkpoints for {primary_name}",
+                content_type=ContentType.COMPARISON,
+                key_points=[
+                    "Compare stock vs custom order implications",
+                    "Explain how samples, decoration proofs, and production scheduling affect launch timing",
+                    "Highlight quote variables and sourcing red flags",
+                ],
+                estimated_word_count=420,
+                order=1,
+            ),
+            OutlineSection(
+                title=f"Specification and sourcing trade-offs for {keyword}",
+                content_type=ContentType.COMPARISON,
+                key_points=[
+                    "Compare material, capacity, closure, decoration, and compliance trade-offs",
+                    "Include a comparison table or shortlist framework",
+                    "Show where the wrong spec choice increases cost, delay, or leakage risk",
+                ],
+                estimated_word_count=420,
+                order=2,
+            ),
+        ]
+
+        if products:
+            product_names = [product.get("name") for product in products if product.get("name")]
+            sections.append(
+                OutlineSection(
+                    title="Mapped product examples and fit scenarios",
+                    content_type=ContentType.CASE_STUDY,
+                    key_points=[
+                        f"Use concrete examples such as {', '.join(product_names[:2])}",
+                        "Explain why each example fits a specific buyer scenario",
+                        "Add internal links when moving from advice to next-step browsing",
+                    ],
+                    estimated_word_count=320,
+                    order=len(sections),
+                )
+            )
+
+        faq_questions = decision_questions or [
+            f"What should buyers compare before ordering {primary_name}?",
+            f"When should buyers browse the {primary_name} landing page instead of requesting a quote immediately?",
+            "Which supplier checks reduce MOQ, lead-time, or quality surprises?",
+        ]
+        sections.append(
+            OutlineSection(
+                title="Frequently Asked Questions",
+                content_type=ContentType.FAQ,
+                key_points=faq_questions,
+                estimated_word_count=320,
+                order=len(sections),
+            )
+        )
+
+        cta_target = seo_context.primary_taxonomy_name or primary_name
+        sections.append(
+            OutlineSection(
+                title="Next step for buyers",
+                content_type=ContentType.CTA,
+                key_points=[
+                    f"Primary CTA: direct readers to the {cta_target} landing page",
+                    "Secondary CTA: point readers to one mapped product example if they are already validating a shortlist",
+                    "Explain why this landing page is the fastest path to compare relevant options",
+                ],
+                estimated_word_count=180,
+                order=len(sections),
+            )
+        )
+
+        seo_context.outline = ContentOutline(
+            title=seo_context.selected_title or seo_context.topic_title or keyword,
+            hook=seo_context.selected_title or seo_context.topic_title or keyword,
+            hook_type=seo_context.title_hook_type or HookType.HOW_TO,
+            sections=sections,
+            conclusion_type="cta",
+            target_word_count=sum(section.estimated_word_count for section in sections),
+            estimated_read_time=9,
+        )
+    except Exception as exc:
+        logger.debug(f"Failed to backfill catalog outline: {exc}")
+
+
+def _get_primary_taxonomy_context(seo_context) -> Dict[str, Optional[str]]:
+    """Resolve the main landing page the article should route buyers toward."""
+    if not seo_context:
+        return {"type": None, "name": None, "url": None}
+
+    return {
+        "type": getattr(seo_context, "primary_taxonomy_type", None)
+        or ("tag" if getattr(seo_context, "target_tag_url", None) else "category" if getattr(seo_context, "target_category_url", None) else None),
+        "name": getattr(seo_context, "primary_taxonomy_name", None)
+        or getattr(seo_context, "target_tag_name", None)
+        or getattr(seo_context, "target_category_name", None),
+        "url": getattr(seo_context, "primary_taxonomy_url", None)
+        or getattr(seo_context, "target_tag_url", None)
+        or getattr(seo_context, "target_category_url", None),
+    }
+
+
+def _is_product_specific_query(keyword: str, supporting_products: list) -> bool:
+    """Detect when the query is specific enough to justify a product-first route."""
+    if not keyword or not supporting_products:
+        return False
+
+    keyword_lower = keyword.lower()
+    if any(term in keyword_lower for term in ["sku", "part number", "30ml", "50ml", "100ml"]):
+        return True
+
+    product = supporting_products[0]
+    product_name = (product.get("name") or "").lower()
+    if product_name and product_name in keyword_lower:
+        return True
+
+    product_terms = [
+        str(product.get("capacity", "")).lower(),
+        str(product.get("material", "")).lower(),
+        str(product.get("closure_type", "")).lower(),
+    ]
+    return len([term for term in product_terms if term and term in keyword_lower]) >= 2
+
+
+def _get_primary_conversion_context(seo_context) -> Dict[str, Optional[str]]:
+    """Resolve whether the CTA should lead with a category, tag, or product page."""
+    if not seo_context:
+        return {"type": None, "name": None, "url": None}
+
+    supporting_products = getattr(seo_context, "supporting_products", []) or []
+    keyword = getattr(seo_context, "target_keyword", "") or getattr(seo_context, "topic_title", "")
+
+    if _is_product_specific_query(keyword, supporting_products):
+        product = supporting_products[0]
+        return {
+            "type": "product",
+            "name": product.get("name"),
+            "url": product.get("url"),
+        }
+
+    return _get_primary_taxonomy_context(seo_context)
+
+
+def _score_catalog_context_for_selection(keyword: str, catalog_context: Dict[str, Any]) -> float:
+    """Score how well a keyword can route into a concrete landing page."""
+    if not catalog_context:
+        return 0.0
+
+    score = 0.2
+    primary_type = catalog_context.get("primary_taxonomy_type")
+    if primary_type == "tag":
+        score += 0.24
+    elif primary_type == "category":
+        score += 0.2
+
+    supporting_products = catalog_context.get("supporting_products") or []
+    if _is_product_specific_query(keyword, supporting_products):
+        score += 0.28
+    if catalog_context.get("primary_taxonomy_url"):
+        score += 0.08
+    if supporting_products:
+        score += min(len(supporting_products), 3) * 0.06
+    if catalog_context.get("decision_questions"):
+        score += min(len(catalog_context.get("decision_questions") or []), 4) * 0.04
+    if catalog_context.get("commercial_facts"):
+        score += min(len(catalog_context.get("commercial_facts") or []), 4) * 0.025
+    if len((keyword or "").split()) >= 4:
+        score += 0.04
+    return round(min(score, 1.0), 3)
+
+
+def _select_best_content_candidate(candidates: list):
+    """Choose the content-aware keyword that best combines routing and commercial value."""
+    if not candidates:
+        return None
+
+    ranked = sorted(
+        candidates,
+        key=lambda candidate: (
+            getattr(candidate, "routing_score", 0),
+            getattr(candidate, "commercial_score", 0),
+            1 if getattr(candidate, "is_long_tail", False) else 0,
+            getattr(candidate, "search_volume", 0) or 0,
+        ),
+        reverse=True,
+    )
+    return ranked[0]
+
+
+def _infer_route_coverage_counts(keywords: list, website_profile) -> Dict[str, int]:
+    """Estimate today's route mix so selection can favor underrepresented paths."""
+    counts = {"category": 0, "tag": 0, "product": 0}
+    if not website_profile:
+        return counts
+
+    for keyword in keywords or []:
+        catalog_context = _match_catalog_context(keyword, website_profile)
+        route_type = catalog_context.get("primary_taxonomy_type") or "category"
+        if _is_product_specific_query(keyword, catalog_context.get("supporting_products") or []):
+            route_type = "product"
+        if route_type in counts:
+            counts[route_type] += 1
+    return counts
+
+
+def _route_balance_bonus(route_type: Optional[str], route_counts: Dict[str, int]) -> float:
+    """Boost route types that have been used less today."""
+    if not route_type:
+        return 0.0
+    if not route_counts:
+        return 0.0
+
+    least_count = min(route_counts.values())
+    route_count = route_counts.get(route_type, 0)
+    if route_count == least_count:
+        return 0.12
+    if route_count == least_count + 1:
+        return 0.06
+    return 0.0
+
+
+def _combined_route_balance_bonus(
+    route_type: Optional[str],
+    route_counts_today: Dict[str, int],
+    route_counts_week: Dict[str, int],
+) -> float:
+    """Combine daily and weekly balancing so one route type does not dominate the week."""
+    return (
+        _route_balance_bonus(route_type, route_counts_today)
+        + _route_balance_bonus(route_type, route_counts_week) * 0.85
+    )
+
+
+def _build_excerpt_from_html(content_html: str, fallback: str = "", max_length: int = 220) -> str:
+    """Create a readable excerpt from HTML without leaking markup into the summary."""
+    text = re.sub(r"<[^>]+>", " ", content_html or "")
+    text = re.sub(r"\s+", " ", text).strip()
+    if not text:
+        return fallback[:max_length]
+    if len(text) <= max_length:
+        return text
+    return text[: max_length - 3].rstrip() + "..."
+
+
+def _truncate_meta_description(text: str, max_length: int = 160) -> str:
+    """Trim meta text cleanly to SERP-safe length."""
+    text = re.sub(r"\s+", " ", (text or "").strip())
+    if len(text) <= max_length:
+        return text
+    trimmed = text[: max_length - 3].rsplit(" ", 1)[0].rstrip(",;:- ")
+    return (trimmed or text[: max_length - 3]).rstrip() + "..."
+
+
+def _generate_catalog_meta_description(seo_context, target_keyword: str, current_year: int) -> str:
+    """Generate a procurement-oriented meta description tied to the chosen landing page."""
+    if not seo_context:
+        return ""
+
+    primary = _get_primary_conversion_context(seo_context)
+    primary_name = primary.get("name")
+    primary_type = primary.get("type")
+    keyword = target_keyword or getattr(seo_context, "target_keyword", "") or getattr(seo_context, "topic_title", "")
+    page_type = getattr(seo_context, "page_type", "") or "category_support"
+
+    routing_phrase = ""
+    if primary_name:
+        if primary_type == "tag":
+            routing_phrase = f"Browse our {primary_name} tag page"
+        elif primary_type == "category":
+            routing_phrase = f"Browse our {primary_name} category"
+        elif primary_type == "product":
+            routing_phrase = f"Review {primary_name}"
+        else:
+            routing_phrase = f"Browse {primary_name}"
+
+    requirement_map = {
+        "wholesale_faq": "MOQ, lead time, samples, and supplier checks",
+        "product_selection": "material, capacity, closure fit, and MOQ",
+        "spec_comparison": "spec trade-offs, fit risks, and sourcing checkpoints",
+        "category_support": "options, customization, and sourcing checkpoints",
+    }
+    requirement_text = requirement_map.get(page_type, "specs, sourcing checkpoints, and buyer trade-offs")
+
+    if routing_phrase and keyword:
+        description = (
+            f"Compare {keyword}, {requirement_text}. {routing_phrase} to shortlist matched options for your {current_year} buying plan."
+        )
+    elif keyword:
+        description = f"Compare {keyword}, {requirement_text}, and real buyer trade-offs before you shortlist or request a quote."
+    else:
+        description = f"Compare {requirement_text} and real buyer trade-offs before you shortlist or request a quote."
+
+    return _truncate_meta_description(description)
+
+
+def _build_procurement_next_step_block(seo_context) -> str:
+    """Build a structured buyer next-step module using category/tag/product routing."""
+    if not seo_context:
+        return ""
+
+    primary = _get_primary_conversion_context(seo_context)
+    primary_name = primary.get("name")
+    primary_url = primary.get("url")
+    primary_type = primary.get("type") or "catalog"
+    if not primary_name or not primary_url:
+        return ""
+
+    keyword = getattr(seo_context, "target_keyword", "") or getattr(seo_context, "topic_title", "") or primary_name
+    alternate_name = None
+    alternate_url = None
+    if primary_type == "tag" and getattr(seo_context, "target_category_url", None):
+        alternate_name = getattr(seo_context, "target_category_name", None)
+        alternate_url = getattr(seo_context, "target_category_url", None)
+    elif primary_type == "category" and getattr(seo_context, "target_tag_url", None):
+        alternate_name = getattr(seo_context, "target_tag_name", None)
+        alternate_url = getattr(seo_context, "target_tag_url", None)
+    elif primary_type == "product":
+        if getattr(seo_context, "target_tag_url", None):
+            alternate_name = getattr(seo_context, "target_tag_name", None)
+            alternate_url = getattr(seo_context, "target_tag_url", None)
+        elif getattr(seo_context, "target_category_url", None):
+            alternate_name = getattr(seo_context, "target_category_name", None)
+            alternate_url = getattr(seo_context, "target_category_url", None)
+
+    product_lines = []
+    for product in getattr(seo_context, "supporting_products", [])[:2]:
+        if product.get("url") and product.get("name"):
+            descriptor = ", ".join(
+                value for value in [product.get("capacity"), product.get("material"), product.get("closure_type")] if value
+            )
+            suffix = f" ({descriptor})" if descriptor else ""
+            product_lines.append(
+                f'<li><strong>Review a shortlist example:</strong> <a href="{product["url"]}">{product["name"]}</a>{suffix} if you are already validating a specific option.</li>'
+            )
+
+    intro_map = {
+        "category": (
+            f'<p>If you are researching {keyword}, start with our <a href="{primary_url}">{primary_name}</a> '
+            "to compare the broader product family before narrowing by material, closure, or decoration.</p>"
+        ),
+        "tag": (
+            f'<p>If you are researching {keyword}, start with our <a href="{primary_url}">{primary_name}</a> '
+            "to filter options by material, feature, or application before you request samples or quotes.</p>"
+        ),
+        "product": (
+            f'<p>If you are researching {keyword}, review <a href="{primary_url}">{primary_name}</a> '
+            "first when you already have a narrow shortlist and need to validate specs, MOQ, and sampling details.</p>"
+        ),
+    }
+    primary_line_map = {
+        "category": (
+            f'<li><strong>Browse the broader category:</strong> '
+            f'<a href="{primary_url}">{primary_name}</a> to compare the closest-fit range before narrowing further.</li>'
+        ),
+        "tag": (
+            f'<li><strong>Browse the narrower tag page:</strong> '
+            f'<a href="{primary_url}">{primary_name}</a> to shortlist options sharing the same material, feature, or use case.</li>'
+        ),
+        "product": (
+            f'<li><strong>Inspect the shortlisted product:</strong> '
+            f'<a href="{primary_url}">{primary_name}</a> to validate specs, MOQ, lead time, and sampling details.</li>'
+        ),
+    }
+
+    lines = [
+        '<section class="buyer-next-step">',
+        "<h2>Next Step: Shortlist Matching Options</h2>",
+        intro_map.get(primary_type, intro_map["category"]),
+        "<ul>",
+        primary_line_map.get(primary_type, primary_line_map["category"]),
+    ]
+
+    if alternate_name and alternate_url:
+        alternate_line = (
+            f'<li><strong>Need a {"broader" if primary_type in {"tag", "product"} else "narrower"} path?</strong> '
+            f'<a href="{alternate_url}">{alternate_name}</a> gives you an alternate way to shortlist by taxonomy.</li>'
+        )
+        if primary_type == "product":
+            alternate_line = (
+                f'<li><strong>Need comparable alternatives?</strong> '
+                f'<a href="{alternate_url}">{alternate_name}</a> helps you compare adjacent options before locking the shortlist.</li>'
+            )
+        lines.append(
+            alternate_line
+        )
+
+    lines.extend(product_lines)
+    lines.extend(["</ul>", "</section>"])
+    return "\n".join(lines)
+
+
+def _append_procurement_next_step_block(content_html: str, seo_context) -> str:
+    """Append the procurement routing module unless the article already includes one."""
+    content_html = content_html or ""
+    if 'class="buyer-next-step"' in content_html.lower():
+        return content_html
+
+    next_step_block = _build_procurement_next_step_block(seo_context)
+    if not next_step_block:
+        return content_html
+
+    return content_html.rstrip() + "\n\n" + next_step_block
+
+
 async def content_generation_job(data: Dict[str, Any]) -> Dict[str, Any]:
     """
     Main content generation job (Advanced SEO Implementation)
@@ -291,6 +877,10 @@ async def content_generation_job(data: Dict[str, Any]) -> Dict[str, Any]:
 
         # Initialize website_profile at function scope
         website_profile = None
+        try:
+            website_profile = await get_cached_website_profile()
+        except Exception as e:
+            logger.debug(f"Initial website profile fetch failed: {e}")
 
         # All used keywords (for deduplication)
         used_keywords = db.query(Keyword.keyword).filter(
@@ -305,8 +895,19 @@ async def content_generation_job(data: Dict[str, Any]) -> Dict[str, Any]:
             Keyword.created_at >= today_start
         ).all()
         today_keyword_list = [kw[0] for kw in today_keywords]
+        week_start = today_start - timedelta(days=6)
+        week_keywords = db.query(Keyword.keyword).filter(
+            Keyword.status.in_([KeywordStatus.IN_PROGRESS, KeywordStatus.PUBLISHED]),
+            Keyword.created_at >= week_start
+        ).all()
+        week_keyword_list = [kw[0] for kw in week_keywords]
+        route_counts_today = _infer_route_coverage_counts(today_keyword_list, website_profile)
+        route_counts_week = _infer_route_coverage_counts(week_keyword_list, website_profile)
 
-        logger.info(f"Found {len(used_keyword_set)} total used keywords, {len(today_keyword_list)} used today")
+        logger.info(
+            f"Found {len(used_keyword_set)} total used keywords, "
+            f"{len(today_keyword_list)} used today, {len(week_keyword_list)} used in last 7 days"
+        )
 
         # Initialize SEOContext for unified SEO element management
         # This will be populated regardless of which keyword source succeeds
@@ -323,13 +924,28 @@ async def content_generation_job(data: Dict[str, Any]) -> Dict[str, Any]:
                 )
                 opportunities = gsc.get_low_hanging_fruits(limit=20)  # Fetch more to filter
 
-                # Filter out used keywords and select first unused
+                scored_gsc = []
                 for opp in opportunities:
+                    if opp.query.lower() in used_keyword_set:
+                        continue
+                    gsc_catalog_context = _match_catalog_context(opp.query, website_profile)
+                    route_type = gsc_catalog_context.get("primary_taxonomy_type") or "category"
+                    if _is_product_specific_query(opp.query, gsc_catalog_context.get("supporting_products") or []):
+                        route_type = "product"
+                    selection_score = (
+                        _score_catalog_context_for_selection(opp.query, gsc_catalog_context)
+                        + _combined_route_balance_bonus(route_type, route_counts_today, route_counts_week)
+                        + min(getattr(opp, "impressions", 0) / 1000, 0.15)
+                        + max(0, (20 - getattr(opp, "position", 20)) / 100) * 0.1
+                    )
+                    scored_gsc.append((selection_score, opp, gsc_catalog_context))
+
+                for _, opp, gsc_catalog_context in sorted(scored_gsc, key=lambda item: item[0], reverse=True):
                     if opp.query.lower() not in used_keyword_set:
                         target_keyword = opp.query
                         target_context = {
                             "source": "GSC (Optimization)",
-                            "metric": f"Pos: {opp.position}, Impr: {opp.impressions}"
+                            "metric": f"Pos: {opp.position}, Impr: {opp.impressions}, RouteScore: {round(_score_catalog_context_for_selection(opp.query, gsc_catalog_context), 2)}"
                         }
                         logger.info(f"Selected unused GSC keyword: {target_keyword}")
                         
@@ -352,9 +968,12 @@ async def content_generation_job(data: Dict[str, Any]) -> Dict[str, Any]:
                             brand_alignment_score=0.7,
                             value_score=0.65
                         )
-                        
                         # Generate optimized titles
-                        optimized_titles = await hook_optimizer.generate_optimized_titles(temp_topic, count=5)
+                        optimized_titles = await hook_optimizer.generate_optimized_titles(
+                            temp_topic,
+                            count=5,
+                            catalog_context=gsc_catalog_context,
+                        )
                         if optimized_titles:
                             best_title = await hook_optimizer.select_best_title(optimized_titles, strategy="balanced", target_keyword=target_keyword)
                             selected_title = best_title.title
@@ -375,6 +994,10 @@ async def content_generation_job(data: Dict[str, Any]) -> Dict[str, Any]:
                             title_hook_type=best_title.hook_type if optimized_titles else HookType.HOW_TO,
                             title_ctr_estimate=best_title.expected_ctr if optimized_titles else 0.04,
                             status=SEOElementStatus.GENERATED
+                        )
+                        _apply_catalog_context_to_seo_context(
+                            seo_context,
+                            gsc_catalog_context
                         )
                         break
         except Exception as e:
@@ -415,16 +1038,22 @@ async def content_generation_job(data: Dict[str, Any]) -> Dict[str, Any]:
                         selected_keywords=today_keyword_list,
                         min_diversity_score=0.4  # 40% different words required
                     )
+                    available_candidates = keyword_strategy.balance_route_coverage(
+                        candidates=available_candidates,
+                        selected_keywords=today_keyword_list,
+                        recent_keywords_7d=week_keyword_list,
+                    )
 
                 if available_candidates:
-                    # Prioritize long-tail keywords (easier to rank)
-                    long_tail = [kw for kw in available_candidates if kw.is_long_tail]
-                    selected = long_tail[0] if long_tail else available_candidates[0]
+                    selected = _select_best_content_candidate(available_candidates)
 
                     target_keyword = selected.keyword
                     target_context = {
                         "source": "Content-Aware (Website Analysis)",
-                        "metric": f"Stage: {selected.journey_stage.value}, Intent: {selected.intent.value}"
+                        "metric": (
+                            f"Stage: {selected.journey_stage.value}, Intent: {selected.intent.value}, "
+                            f"Route: {selected.route_target_type or selected.primary_taxonomy_type or 'none'}:{selected.route_target_name or selected.primary_taxonomy_name or 'n/a'}"
+                        )
                     }
                     logger.info(f"Selected content-aware keyword: {target_keyword} (Stage: {selected.journey_stage.value})")
                     
@@ -449,9 +1078,30 @@ async def content_generation_job(data: Dict[str, Any]) -> Dict[str, Any]:
                             brand_alignment_score=0.7,
                             value_score=0.65
                         )
+                        content_aware_catalog_context = {
+                            "page_type": selected.page_type,
+                            "target_category_name": selected.target_category,
+                            "target_category_slug": selected.target_category_slug,
+                            "target_category_url": selected.target_category_url,
+                            "target_tag_name": selected.target_tag,
+                            "target_tag_slug": selected.target_tag_slug,
+                            "target_tag_url": selected.target_tag_url,
+                            "primary_taxonomy_type": selected.primary_taxonomy_type,
+                            "primary_taxonomy_name": selected.primary_taxonomy_name,
+                            "primary_taxonomy_slug": selected.primary_taxonomy_slug,
+                            "primary_taxonomy_url": selected.primary_taxonomy_url,
+                            "supporting_products": selected.supporting_products,
+                            "supporting_tags": selected.supporting_tags,
+                            "decision_questions": selected.decision_questions,
+                            "commercial_facts": selected.commercial_facts,
+                        }
                         
                         # Generate optimized titles
-                        optimized_titles = await hook_optimizer.generate_optimized_titles(temp_topic, count=5)
+                        optimized_titles = await hook_optimizer.generate_optimized_titles(
+                            temp_topic,
+                            count=5,
+                            catalog_context=content_aware_catalog_context,
+                        )
                         if optimized_titles:
                             best_title = await hook_optimizer.select_best_title(optimized_titles, strategy="balanced", target_keyword=target_keyword)
                             selected_title = best_title.title
@@ -474,6 +1124,10 @@ async def content_generation_job(data: Dict[str, Any]) -> Dict[str, Any]:
                             title_ctr_estimate=best_title.expected_ctr if optimized_titles else 0.04,
                             status=SEOElementStatus.GENERATED
                         )
+                        _apply_catalog_context_to_seo_context(
+                            seo_context,
+                            content_aware_catalog_context
+                        )
             except Exception as e:
                 logger.warning(f"Content-aware keyword generation failed: {e}")
 
@@ -493,12 +1147,31 @@ async def content_generation_job(data: Dict[str, Any]) -> Dict[str, Any]:
                 suggestions = await kw_client.get_easy_wins(seed)
 
                 # Filter out used keywords
+                scored_api_keywords = []
                 for kw in suggestions:
+                    if kw.keyword.lower() in used_keyword_set:
+                        continue
+                    api_catalog_context = _match_catalog_context(kw.keyword, website_profile)
+                    route_type = api_catalog_context.get("primary_taxonomy_type") or "category"
+                    if _is_product_specific_query(kw.keyword, api_catalog_context.get("supporting_products") or []):
+                        route_type = "product"
+                    selection_score = (
+                        _score_catalog_context_for_selection(kw.keyword, api_catalog_context)
+                        + _combined_route_balance_bonus(route_type, route_counts_today, route_counts_week)
+                        + min((getattr(kw, "volume", 0) or 0) / 2000, 0.2)
+                        + max(0, (100 - (getattr(kw, "difficulty", 50) or 50)) / 100) * 0.15
+                    )
+                    scored_api_keywords.append((selection_score, kw, api_catalog_context))
+
+                for _, kw, api_catalog_context in sorted(scored_api_keywords, key=lambda item: item[0], reverse=True):
                     if kw.keyword.lower() not in used_keyword_set:
                         target_keyword = kw.keyword
                         target_context = {
                             "source": "KeywordAPI (Expansion)",
-                            "metric": f"Vol: {kw.volume}, KD: {kw.difficulty}"
+                            "metric": (
+                                f"Vol: {kw.volume}, KD: {kw.difficulty}, "
+                                f"RouteScore: {round(_score_catalog_context_for_selection(kw.keyword, api_catalog_context), 2)}"
+                            )
                         }
                         logger.info(f"Selected unused Keyword API keyword: {target_keyword}")
                         
@@ -523,9 +1196,12 @@ async def content_generation_job(data: Dict[str, Any]) -> Dict[str, Any]:
                                 brand_alignment_score=0.7,
                                 value_score=0.65
                             )
-                            
                             # Generate optimized titles
-                            optimized_titles = await hook_optimizer.generate_optimized_titles(temp_topic, count=5)
+                            optimized_titles = await hook_optimizer.generate_optimized_titles(
+                                temp_topic,
+                                count=5,
+                                catalog_context=api_catalog_context,
+                            )
                             if optimized_titles:
                                 best_title = await hook_optimizer.select_best_title(optimized_titles, strategy="balanced", target_keyword=target_keyword)
                                 selected_title = best_title.title
@@ -545,6 +1221,10 @@ async def content_generation_job(data: Dict[str, Any]) -> Dict[str, Any]:
                                 title_hook_type=best_title.hook_type if optimized_titles else HookType.HOW_TO,
                                 title_ctr_estimate=best_title.expected_ctr if optimized_titles else 0.04,
                                 status=SEOElementStatus.GENERATED
+                            )
+                            _apply_catalog_context_to_seo_context(
+                                seo_context,
+                                api_catalog_context
                             )
                         break
             except Exception as e:
@@ -597,10 +1277,15 @@ async def content_generation_job(data: Dict[str, Any]) -> Dict[str, Any]:
                         if topic.title.lower() not in used_keyword_set:
                             selected_topic = topic
                             target_keyword = topic.title
+                            ci_catalog_context = _match_catalog_context(topic.title, website_profile)
                             
                             # Generate optimized title variants using HookOptimizer
                             logger.info(f"Generating optimized title variants for: {topic.title}")
-                            optimized_titles = await hook_optimizer.generate_optimized_titles(topic, count=5)
+                            optimized_titles = await hook_optimizer.generate_optimized_titles(
+                                topic,
+                                count=5,
+                                catalog_context=ci_catalog_context,
+                            )
                             
                             # Select best title based on CTR strategy
                             best_title = await hook_optimizer.select_best_title(optimized_titles, strategy="balanced", target_keyword=target_keyword)
@@ -624,6 +1309,10 @@ async def content_generation_job(data: Dict[str, Any]) -> Dict[str, Any]:
                                 business_intent=topic.business_intent,
                                 status=SEOElementStatus.GENERATED
                             )
+                            _apply_catalog_context_to_seo_context(
+                                seo_context,
+                                ci_catalog_context
+                            )
                             
                             target_context = {
                                 "source": "ContentIntelligence (Research-Based)",
@@ -635,7 +1324,10 @@ async def content_generation_job(data: Dict[str, Any]) -> Dict[str, Any]:
                                 "ctr_estimate": best_title.expected_ctr,
                                 "outline": topic.outline.dict() if topic.outline else None,
                                 "research_result": topic.research_result.dict() if topic.research_result else None,
-                                "optimized_titles_count": len(optimized_titles)
+                                "optimized_titles_count": len(optimized_titles),
+                                "target_category": seo_context.target_category_name,
+                                "target_tag": seo_context.target_tag_name,
+                                "supporting_products": [p.get("name") for p in seo_context.supporting_products],
                             }
                             logger.info(f"Selected research-based topic: {target_keyword}")
                             logger.info(f"Optimized title: {best_title.title} (CTR: {best_title.expected_ctr:.3f}, Hook: {best_title.hook_type.value})")
@@ -675,9 +1367,14 @@ async def content_generation_job(data: Dict[str, Any]) -> Dict[str, Any]:
                         brand_alignment_score=0.6,
                         value_score=0.55
                     )
+                    emergency_catalog_context = _match_catalog_context(target_keyword, website_profile)
 
                     # Generate optimized title
-                    optimized_titles = await hook_optimizer.generate_optimized_titles(temp_topic, count=3)
+                    optimized_titles = await hook_optimizer.generate_optimized_titles(
+                        temp_topic,
+                        count=3,
+                        catalog_context=emergency_catalog_context,
+                    )
                     if optimized_titles:
                         best_title = await hook_optimizer.select_best_title(optimized_titles, strategy="balanced")
                         selected_title = best_title.title
@@ -697,6 +1394,10 @@ async def content_generation_job(data: Dict[str, Any]) -> Dict[str, Any]:
                         industry=website_profile.business_type if website_profile else "packaging",
                         target_audience=website_profile.target_audience if website_profile else "b2b_buyers",
                         status=SEOElementStatus.GENERATED
+                    )
+                    _apply_catalog_context_to_seo_context(
+                        seo_context,
+                        emergency_catalog_context
                     )
 
         # Save keyword to database with IN_PROGRESS status
@@ -730,6 +1431,7 @@ async def content_generation_job(data: Dict[str, Any]) -> Dict[str, Any]:
         
         # --- Layer 3: Internal Linking Context ---
         existing_posts_context = []
+        existing_content_for_quality = []
         wp_adapter = WordPressAdapter(
             base_url=settings.wordpress_url,
             username=settings.wordpress_username,
@@ -741,6 +1443,19 @@ async def content_generation_job(data: Dict[str, Any]) -> Dict[str, Any]:
             # Fetch recent posts for internal linking context
             recent_posts = await wp_adapter.get_simple_posts_for_linking(limit=10)
             existing_posts_context = [f"- {p['title']} (URL: {p['link']})" for p in recent_posts]
+
+            try:
+                published_posts = await wp_adapter.wp_client.get_posts(per_page=8, status="publish")
+                existing_content_for_quality = [
+                    {
+                        "id": str(post.get("id")),
+                        "content": post.get("content", {}).get("rendered", ""),
+                        "url": post.get("link"),
+                    }
+                    for post in published_posts
+                ]
+            except Exception as quality_fetch_error:
+                logger.debug(f"Failed to fetch published posts for quality gate: {quality_fetch_error}")
             
             # Update SEOContext with internal linking opportunities
             if seo_context and recent_posts:
@@ -752,11 +1467,17 @@ async def content_generation_job(data: Dict[str, Any]) -> Dict[str, Any]:
                         anchor_text_suggestions=[post['title'], f"{post['title']} guide", f"learn about {post['title']}"],
                         relevance_score=0.7,  # TODO: Calculate actual relevance
                         context_paragraph="TBD"  # Will be determined during content generation
-                    )
+                        )
                     seo_context.internal_links.append(opportunity)
+
+                _add_catalog_links(seo_context)
+            elif seo_context:
+                _add_catalog_links(seo_context)
                     
         except Exception as e:
             logger.warning(f"Failed to fetch internal linking context: {e}")
+            if seo_context:
+                _add_catalog_links(seo_context)
 
         # --- Layer 4: Expert Content Creation (AI) ---
         # Use ContentCreatorAgent with SEOContext for synchronized content generation
@@ -784,16 +1505,17 @@ async def content_generation_job(data: Dict[str, Any]) -> Dict[str, Any]:
             logger.info(f"Using SEOContext for synchronized content generation")
             logger.info(f"Selected title: {seo_context.selected_title}")
             logger.info(f"Hook type: {seo_context.title_hook_type.value if seo_context.title_hook_type else 'N/A'}")
+            _ensure_catalog_outline(seo_context)
             
             # Create task from SEOContext
             creator_task = seo_context.to_content_creator_task()
-            creator_task["products"] = []  # Could be populated from website profile
             
             # Generate content using ContentCreatorAgent
             content_result = await content_agent.execute(creator_task)
             
             if content_result.get("status") == "success":
                 content_html = content_result.get("content", "")
+                content_html = _append_procurement_next_step_block(content_html, seo_context)
                 seo_context.content_html = content_html
                 seo_context.content_word_count = len(content_html.split())
                 logger.info(f"Content generated: {seo_context.content_word_count} words")
@@ -857,7 +1579,60 @@ async def content_generation_job(data: Dict[str, Any]) -> Dict[str, Any]:
             
             # High timeout for deep content
             content_html = await ai_provider.generate_text(article_prompt, temperature=0.7, max_tokens=3500)
-        
+            if seo_context:
+                content_html = _append_procurement_next_step_block(content_html, seo_context)
+
+        # --- Layer 4.2: Quality Gate ---
+        from src.services.quality_gate import EnhancedQualityGate
+
+        quality_gate = EnhancedQualityGate()
+        content_for_quality = seo_context.content_html if seo_context and seo_context.content_html else content_html
+        content_components = _infer_content_components(content_for_quality, seo_context)
+        catalog_context = {
+            "page_type": seo_context.page_type if seo_context else None,
+            "target_category_name": seo_context.target_category_name if seo_context else None,
+            "target_category_url": seo_context.target_category_url if seo_context else None,
+            "target_tag_name": seo_context.target_tag_name if seo_context else None,
+            "target_tag_url": seo_context.target_tag_url if seo_context else None,
+            "primary_taxonomy_type": seo_context.primary_taxonomy_type if seo_context else None,
+            "primary_taxonomy_name": seo_context.primary_taxonomy_name if seo_context else None,
+            "primary_taxonomy_url": seo_context.primary_taxonomy_url if seo_context else None,
+            "supporting_products": seo_context.supporting_products if seo_context else [],
+            "supporting_tags": seo_context.supporting_tags if seo_context else [],
+            "decision_questions": seo_context.decision_questions if seo_context else [],
+            "commercial_facts": seo_context.commercial_facts if seo_context else [],
+        }
+
+        quality_diagnostic = await quality_gate.full_diagnostic(
+            content=content_for_quality,
+            content_id=seo_context.content_id if seo_context and seo_context.content_id else f"generated_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+            existing_content=existing_content_for_quality if existing_content_for_quality else None,
+            target_keyword=target_keyword,
+            components=content_components,
+            page_type=seo_context.page_type if seo_context else None,
+            catalog_context=catalog_context if seo_context else None,
+        )
+
+        quality_summary = {
+            "score": round(quality_diagnostic.overall_score, 1),
+            "grade": quality_diagnostic.grade,
+            "passed": quality_diagnostic.passed,
+            "can_publish": quality_diagnostic.can_publish,
+            "issues": len(quality_diagnostic.issues),
+            "top_recommendations": quality_diagnostic.top_recommendations[:3],
+        }
+        result["steps"].append({"step": "quality_gate", "data": quality_summary})
+
+        if seo_context:
+            seo_context.generation_metrics["quality_gate"] = quality_summary
+
+        if not quality_diagnostic.can_publish:
+            logger.warning(
+                f"Quality gate blocked publish readiness for {target_keyword}: "
+                f"score={quality_diagnostic.overall_score:.1f}, issues={len(quality_diagnostic.issues)}"
+            )
+            auto_publish = False
+
         # 4.3 Synchronized Meta Generation (using selected title from SEOContext)
         current_year = datetime.now().year
         
@@ -866,9 +1641,11 @@ async def content_generation_job(data: Dict[str, Any]) -> Dict[str, Any]:
             # Title is already selected - DON'T regenerate it
             selected_title = seo_context.selected_title
             hook_type = seo_context.title_hook_type.value if seo_context.title_hook_type else "general"
-            
-            # Generate meta description based on the ALREADY SELECTED title
-            meta_prompt = f"""
+
+            meta_description = _generate_catalog_meta_description(seo_context, target_keyword, current_year)
+            if not meta_description:
+                # Fallback for non-catalog contexts
+                meta_prompt = f"""
 Generate a compelling meta description for an article titled:
 "{selected_title}"
 
@@ -885,16 +1662,15 @@ Requirements:
 
 Output ONLY the meta description text (no JSON, no quotes).
 """
-            
-            meta_description = await ai_provider.generate_text(meta_prompt, temperature=0.6, max_tokens=200)
-            meta_description = meta_description.strip().replace('"', '')
-            
-            # Ensure length constraint
-            if len(meta_description) > 160:
-                meta_description = meta_description[:157] + "..."
-            
-            # Create excerpt from content or meta description
-            excerpt = seo_context.content_html[:300] + "..." if seo_context and seo_context.content_html else meta_description
+                meta_description = await ai_provider.generate_text(meta_prompt, temperature=0.6, max_tokens=200)
+                meta_description = meta_description.strip().replace('"', '')
+                meta_description = _truncate_meta_description(meta_description)
+
+            excerpt = _build_excerpt_from_html(
+                seo_context.content_html if seo_context and seo_context.content_html else "",
+                fallback=meta_description,
+                max_length=220,
+            )
             
             meta_data = {
                 "title": selected_title,  # CRITICAL: Use the selected title, don't regenerate!

@@ -6,7 +6,7 @@ Generates optimized titles with multiple hook types and CTR estimation.
 
 import logging
 import random
-from typing import List
+from typing import List, Optional, Dict, Any
 from datetime import datetime
 
 from src.models.content_intelligence import (
@@ -39,6 +39,12 @@ class HookOptimizer:
         HookType.HOW_TO: 0.038,
         HookType.CONTROVERSY: 0.055
     }
+
+    COMMERCIAL_TITLE_TERMS = [
+        "moq", "lead time", "sample", "samples", "supplier", "quote",
+        "customization", "material", "capacity", "closure", "qc",
+        "certifications", "audit", "checklist"
+    ]
     
     def __init__(self):
         self.title_templates = self._load_title_templates()
@@ -96,7 +102,8 @@ class HookOptimizer:
     async def generate_optimized_titles(
         self,
         topic: ContentTopic,
-        count: int = 5
+        count: int = 5,
+        catalog_context: Optional[Dict[str, Any]] = None
     ) -> List[OptimizedTitle]:
         """
         Generate multiple title variants with CTR scoring
@@ -117,8 +124,8 @@ class HookOptimizer:
         hook_types = list(HookType)[:count]
         
         for i, hook_type in enumerate(hook_types):
-            title, rationale = self._generate_title_for_hook(topic, research, hook_type)
-            expected_ctr = self._estimate_ctr(hook_type, topic, research)
+            title, rationale = self._generate_title_for_hook(topic, research, hook_type, catalog_context)
+            expected_ctr = self._estimate_ctr(hook_type, topic, research, title, catalog_context)
             
             variant = OptimizedTitle(
                 title=title,
@@ -138,7 +145,8 @@ class HookOptimizer:
     def generate_optimized_titles_sync(
         self,
         topic: ContentTopic,
-        count: int = 5
+        count: int = 5,
+        catalog_context: Optional[Dict[str, Any]] = None
     ) -> List[OptimizedTitle]:
         """Synchronous version for testing"""
         variants = []
@@ -146,8 +154,8 @@ class HookOptimizer:
         hook_types = list(HookType)[:count]
 
         for i, hook_type in enumerate(hook_types):
-            title, rationale = self._generate_title_for_hook(topic, research, hook_type)
-            expected_ctr = self._estimate_ctr(hook_type, topic, research)
+            title, rationale = self._generate_title_for_hook(topic, research, hook_type, catalog_context)
+            expected_ctr = self._estimate_ctr(hook_type, topic, research, title, catalog_context)
 
             variant = OptimizedTitle(
                 title=title,
@@ -165,13 +173,23 @@ class HookOptimizer:
         self,
         topic: ContentTopic,
         research: ResearchResult,
-        hook_type: HookType
+        hook_type: HookType,
+        catalog_context: Optional[Dict[str, Any]] = None
     ) -> tuple[str, str]:
         """Generate a title for a specific hook type using intent analysis"""
         intent_signal = self.intent_analyzer.analyze_intent(
             topic.title,
             related_keywords=[topic.angle] if topic.angle else []
         )
+
+        catalog_title = self._generate_catalog_anchored_title(
+            topic=topic,
+            hook_type=hook_type,
+            intent_signal=intent_signal,
+            catalog_context=catalog_context or {},
+        )
+        if catalog_title:
+            return catalog_title
 
         # Use intent analyzer for PROBLEM and HOW_TO hooks
         if hook_type in [HookType.PROBLEM, HookType.HOW_TO]:
@@ -190,10 +208,10 @@ class HookOptimizer:
         try:
             title = template.format(**context)
         except KeyError:
-            title = self._generate_fallback_title(topic, hook_type, intent_signal)
+            title = self._generate_fallback_title(topic, hook_type, research, intent_signal)
 
         if self._should_replace_generated_title(title, topic.title):
-            title = self._generate_fallback_title(topic, hook_type, intent_signal)
+            title = self._generate_fallback_title(topic, hook_type, research, intent_signal)
             rationale = (
                 f"Keyword-anchored fallback for {hook_type.value} hook to preserve query intent "
                 f"({intent_signal.intent.value}, confidence: {intent_signal.confidence:.0%})"
@@ -202,6 +220,184 @@ class HookOptimizer:
 
         rationale = self._generate_rationale(hook_type, context)
         return title, rationale
+
+    def _generate_catalog_anchored_title(
+        self,
+        topic: ContentTopic,
+        hook_type: HookType,
+        intent_signal,
+        catalog_context: Dict[str, Any],
+    ) -> Optional[tuple[str, str]]:
+        """Generate titles anchored to category/product/buyer context."""
+        if not catalog_context:
+            return None
+
+        page_type = catalog_context.get("page_type")
+        target_category = catalog_context.get("target_category_name")
+        target_tag = catalog_context.get("target_tag_name")
+        primary_target = (
+            catalog_context.get("primary_taxonomy_name")
+            or target_category
+            or target_tag
+        )
+        supporting_products = catalog_context.get("supporting_products") or []
+        decision_questions = catalog_context.get("decision_questions") or []
+
+        subject = self._keyword_title(topic.title)
+        category_title = self._keyword_title(primary_target) if primary_target else None
+        product = supporting_products[0] if supporting_products else {}
+        product_name = self._keyword_title(product.get("name", "")) if product.get("name") else None
+        spec_terms = self._extract_spec_terms(product, topic.title)
+        buyer_angle = self._derive_buyer_angle(decision_questions, page_type)
+        hook_tail = self._catalog_tail_for_hook(hook_type, page_type, buyer_angle, spec_terms)
+
+        if page_type == "wholesale_faq":
+            title = f"{subject}: {hook_tail}"
+            return title, "Catalog-backed wholesale FAQ title using supplier decision criteria"
+
+        if page_type == "product_selection":
+            if category_title:
+                title = f"{subject} for {category_title}: {hook_tail}"
+            else:
+                title = f"{subject}: {hook_tail}"
+            return title, "Catalog-backed product selection title using category fit and buyer criteria"
+
+        if page_type == "spec_comparison":
+            title = f"{subject}: {hook_tail}"
+            return title, "Catalog-backed comparison title emphasizing specs and trade-offs"
+
+        if page_type == "category_support":
+            focus = hook_tail
+            if category_title and category_title.lower() not in subject.lower():
+                title = f"{category_title}: {focus}"
+            else:
+                title = f"{subject}: {focus}"
+            return title, "Catalog-backed category support title aligned to browsing and shortlist intent"
+
+        if product_name and hook_type in {HookType.DATA, HookType.QUESTION}:
+            title = f"{subject}: {hook_tail}"
+            return title, "Catalog-backed commercial title using product example and buyer questions"
+
+        return None
+
+    def _catalog_tail_for_hook(
+        self,
+        hook_type: HookType,
+        page_type: Optional[str],
+        buyer_angle: Optional[str],
+        spec_terms: Optional[str],
+    ) -> str:
+        """Choose a hook-sensitive tail for catalog-backed titles."""
+        defaults = {
+            "wholesale_faq": {
+                HookType.DATA: "MOQ, Lead Time, Cost Signals, and Buyer Benchmarks",
+                HookType.PROBLEM: "MOQ, Lead Time, and Supplier Mistakes to Avoid",
+                HookType.HOW_TO: "Samples, MOQ, and Ordering Steps",
+                HookType.QUESTION: "Supplier Questions, MOQ, and Lead Time Checks",
+                HookType.STORY: "Buyer Lessons, MOQ, and Ordering Risks",
+                HookType.CONTROVERSY: "Common Supplier Claims, MOQ, and the Real Trade-Offs",
+            },
+            "product_selection": {
+                HookType.DATA: "Material, Capacity, Closure Fit, and Buyer Benchmarks",
+                HookType.PROBLEM: "Selection Mistakes, Fit Risks, and Better Options",
+                HookType.HOW_TO: "Material, Capacity, and Closure Selection",
+                HookType.QUESTION: "Which Specs Fit, and Which Ones Fail?",
+                HookType.STORY: "Buyer Lessons, Fit Risks, and Selection Criteria",
+                HookType.CONTROVERSY: "Common Assumptions, Fit Risks, and Better Criteria",
+            },
+            "spec_comparison": {
+                HookType.DATA: "Specs, Performance Data, and Buyer Trade-Offs",
+                HookType.PROBLEM: "Spec Risks, Trade-Offs, and Selection Mistakes",
+                HookType.HOW_TO: "Spec Comparison and Selection Criteria",
+                HookType.QUESTION: "Which Spec Wins for Performance, Cost, and Fit?",
+                HookType.STORY: "Comparison Lessons, Fit Risks, and Buyer Takeaways",
+                HookType.CONTROVERSY: "Common Spec Assumptions and the Real Trade-Offs",
+            },
+            "category_support": {
+                HookType.DATA: "Product Types, Material Options, and Buyer Benchmarks",
+                HookType.PROBLEM: "Selection Mistakes, Category Gaps, and Better Options",
+                HookType.HOW_TO: "Product Types, Material Options, and Buyer Checklist",
+                HookType.QUESTION: "Which Options Fit Your Product and Budget?",
+                HookType.STORY: "Buyer Lessons, Shortlisting Tips, and Better Options",
+                HookType.CONTROVERSY: "Common Category Assumptions and Better Buying Criteria",
+            },
+        }
+
+        page_defaults = defaults.get(page_type or "", {})
+        fallback = buyer_angle or spec_terms or "Buyer Checklist and Selection Criteria"
+
+        if hook_type == HookType.DATA and buyer_angle:
+            return f"{buyer_angle} and Buyer Benchmarks"
+        if hook_type == HookType.PROBLEM and buyer_angle:
+            return f"{buyer_angle} and Common Buying Mistakes"
+        if hook_type == HookType.QUESTION and buyer_angle:
+            return f"{buyer_angle} and the Questions Buyers Should Ask"
+        if hook_type == HookType.HOW_TO and buyer_angle:
+            return buyer_angle
+
+        return page_defaults.get(hook_type, fallback)
+
+    def _extract_spec_terms(self, product: Dict[str, Any], topic_title: str) -> Optional[str]:
+        """Build a short spec-focused tail from product or topic context."""
+        terms = []
+        for key in ("capacity", "material", "closure_type", "neck_finish"):
+            value = product.get(key)
+            if value:
+                normalized = self._keyword_title(str(value))
+                if normalized not in terms:
+                    terms.append(normalized)
+
+        topic_lower = topic_title.lower()
+        if "moq" in topic_lower and "MOQ" not in terms:
+            terms.append("MOQ")
+        if "lead time" in topic_lower and "Lead Time" not in terms:
+            terms.append("Lead Time")
+
+        if len(terms) >= 3:
+            return ", ".join(terms[:3]) + ", and Fit"
+        if len(terms) == 2:
+            return f"{terms[0]}, {terms[1]}, and Buyer Fit"
+        if len(terms) == 1:
+            return f"{terms[0]} and Buying Fit"
+        return None
+
+    def _derive_buyer_angle(self, decision_questions: List[str], page_type: Optional[str]) -> Optional[str]:
+        """Compress mapped buyer questions into title-friendly angle text."""
+        if not decision_questions:
+            defaults = {
+                "wholesale_faq": "MOQ, Lead Time, Samples, and Customization",
+                "product_selection": "Material, Capacity, and Closure Selection",
+                "spec_comparison": "Specs, Trade-Offs, and Selection Criteria",
+                "category_support": "Product Types, Material Options, and Buyer Checklist",
+            }
+            return defaults.get(page_type or "")
+
+        question_text = " ".join(decision_questions).lower()
+        parts = []
+        if "moq" in question_text:
+            parts.append("MOQ")
+        if "lead time" in question_text:
+            parts.append("Lead Time")
+        if "sample" in question_text:
+            parts.append("Samples")
+        if "certification" in question_text or "compliance" in question_text:
+            parts.append("Certifications")
+        if "closure" in question_text or "neck finish" in question_text:
+            parts.append("Closure Fit")
+        if "material" in question_text:
+            parts.append("Material Selection")
+        if "capacity" in question_text:
+            parts.append("Capacity Fit")
+        if "supplier" in question_text or "audit" in question_text:
+            parts.append("Supplier Checks")
+
+        if not parts:
+            return None
+        if len(parts) == 1:
+            return parts[0]
+        if len(parts) == 2:
+            return f"{parts[0]} and {parts[1]}"
+        return ", ".join(parts[:2]) + f", and {parts[2]}"
     
     def _build_template_context(
         self,
@@ -274,12 +470,22 @@ class HookOptimizer:
         self,
         topic: ContentTopic,
         hook_type: HookType,
+        research: Optional[ResearchResult] = None,
         intent_signal=None
     ) -> str:
         """Generate a fallback title if template fails"""
         keyword_title = self.intent_analyzer.generate_intent_based_title(intent_signal) if intent_signal else topic.title
+        data_fallback = f"{self._keyword_title(topic.title)}: Cost, Performance Data, and Buyer Benchmarks"
+        if hook_type == HookType.DATA and research and research.statistics:
+            stat = research.statistics[0]
+            stat_value = stat.get("value")
+            stat_subject = self._keyword_title(str(stat.get("subject", "buyers")))
+            stat_metric = self._keyword_title(str(stat.get("metric", "performance")))
+            if stat_value is not None:
+                data_fallback = f"{self._keyword_title(topic.title)}: {stat_value}% of {stat_subject} Report {stat_metric}"
+
         fallbacks = {
-            HookType.DATA: f"{self._keyword_title(topic.title)}: Cost, Performance Data, and Buyer Benchmarks",
+            HookType.DATA: data_fallback,
             HookType.PROBLEM: keyword_title,
             HookType.HOW_TO: keyword_title,
             HookType.QUESTION: f"{self._keyword_title(topic.title)}: Key Questions, Trade-Offs, and Selection Criteria",
@@ -326,7 +532,9 @@ class HookOptimizer:
         self,
         hook_type: HookType,
         topic: ContentTopic,
-        research: ResearchResult
+        research: ResearchResult,
+        title: Optional[str] = None,
+        catalog_context: Optional[Dict[str, Any]] = None
     ) -> float:
         """
         Estimate expected CTR based on multiple factors
@@ -355,9 +563,25 @@ class HookOptimizer:
         
         # Adjust for differentiation
         differentiation_boost = topic.differentiation_score * 0.015
-        
+
+        commercial_boost = 0
+        if title:
+            title_lower = title.lower()
+            commercial_signal_count = sum(1 for term in self.COMMERCIAL_TITLE_TERMS if term in title_lower)
+            commercial_boost += min(0.012, commercial_signal_count * 0.003)
+
+        if catalog_context:
+            if catalog_context.get("target_category_name"):
+                commercial_boost += 0.003
+            if catalog_context.get("target_tag_name"):
+                commercial_boost += 0.003
+            if catalog_context.get("supporting_products"):
+                commercial_boost += 0.004
+            if catalog_context.get("decision_questions"):
+                commercial_boost += 0.003
+
         # Calculate final CTR
-        estimated_ctr = base_ctr + intent_boost + research_score + differentiation_boost
+        estimated_ctr = base_ctr + intent_boost + research_score + differentiation_boost + commercial_boost
         
         # Cap at reasonable bounds
         estimated_ctr = max(0.02, min(0.08, estimated_ctr))
