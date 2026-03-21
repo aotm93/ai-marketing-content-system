@@ -18,6 +18,13 @@ from collections import Counter
 logger = logging.getLogger(__name__)
 
 
+CATEGORY_STOPWORDS = {
+    "a", "an", "and", "any", "best", "bulk", "custom", "for", "free", "how",
+    "in", "my", "of", "or", "our", "the", "their", "these", "this", "those",
+    "to", "top", "your"
+}
+
+
 @dataclass
 class WebsiteProfile:
     """Website business profile extracted from content analysis"""
@@ -124,14 +131,14 @@ class WebsiteAnalyzer:
 
         # Common packaging product patterns
         product_patterns = [
-            r'\b(\w+\s+)?bottles?\b',
-            r'\b(\w+\s+)?jars?\b',
-            r'\b(\w+\s+)?containers?\b',
-            r'\b(\w+\s+)?tubes?\b',
-            r'\b(\w+\s+)?pumps?\b',
-            r'\b(\w+\s+)?caps?\b',
-            r'\b(\w+\s+)?packaging\b',
-            r'\b(\w+\s+)?dispensers?\b',
+            r'\b(?:[a-z0-9-]+\s+){0,2}bottles?\b',
+            r'\b(?:[a-z0-9-]+\s+){0,2}jars?\b',
+            r'\b(?:[a-z0-9-]+\s+){0,2}containers?\b',
+            r'\b(?:[a-z0-9-]+\s+){0,2}tubes?\b',
+            r'\b(?:[a-z0-9-]+\s+){0,2}pumps?\b',
+            r'\b(?:[a-z0-9-]+\s+){0,2}caps?\b',
+            r'\b(?:[a-z0-9-]+\s+){0,2}packaging\b',
+            r'\b(?:[a-z0-9-]+\s+){0,2}dispensers?\b',
         ]
 
         all_text = ' '.join(titles + contents).lower()
@@ -139,11 +146,8 @@ class WebsiteAnalyzer:
         for pattern in product_patterns:
             matches = re.findall(pattern, all_text, re.IGNORECASE)
             for match in matches:
-                if isinstance(match, tuple):
-                    category = ' '.join(filter(None, match)).strip()
-                else:
-                    category = match.strip()
-                if category and len(category) > 2:
+                category = self._normalize_category_phrase(match)
+                if category:
                     categories.append(category)
 
         # Count frequency and return top categories
@@ -152,6 +156,35 @@ class WebsiteAnalyzer:
 
         logger.info(f"Extracted {len(top_categories)} product categories")
         return top_categories
+
+    def _normalize_category_phrase(self, phrase: str) -> str:
+        """Normalize extracted noun phrases and remove low-value fragments."""
+        cleaned = re.sub(r'[^a-z0-9\s-]', ' ', phrase.lower())
+        cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+        if not cleaned:
+            return ""
+
+        words = cleaned.split()
+        if not words:
+            return ""
+
+        head = words[-1]
+        modifiers = [
+            word for word in words[:-1]
+            if len(word) > 2 and word not in CATEGORY_STOPWORDS
+        ]
+
+        if head in CATEGORY_STOPWORDS:
+            return ""
+
+        if not modifiers and head in {"packaging"}:
+            return ""
+
+        normalized = " ".join(modifiers + [head]).strip()
+        if len(normalized) < 4:
+            return ""
+
+        return normalized
 
     def _extract_industry_terms(self, titles: List[str], contents: List[str]) -> List[str]:
         """Extract industry-specific terminology"""
@@ -249,4 +282,3 @@ class WebsiteAnalyzer:
     async def get_cached_profile(self) -> Optional[WebsiteProfile]:
         """Get cached profile if available"""
         return self._cached_profile
-

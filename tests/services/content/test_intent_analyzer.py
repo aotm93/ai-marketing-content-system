@@ -105,6 +105,35 @@ class TestSearchIntentAnalyzer:
         assert "outdoor" in title.lower()
         assert "Which is Better?" not in title  # Avoid generic endings
 
+    def test_analyze_buying_guide_intent(self):
+        """Should detect buying/supplier intent from commercial keywords"""
+        analyzer = SearchIntentAnalyzer()
+
+        result = analyzer.analyze_intent(
+            "plastic bottles wholesale supplier",
+            related_keywords=["moq", "quote", "lead time"]
+        )
+
+        assert result.intent == UserIntent.BUYING_GUIDE
+        assert result.confidence > 0.7
+
+    def test_generate_buying_guide_title(self):
+        """Should generate commercial titles with concrete buyer value"""
+        analyzer = SearchIntentAnalyzer()
+
+        signal = IntentSignal(
+            keyword="plastic bottles wholesale supplier",
+            intent=UserIntent.BUYING_GUIDE,
+            confidence=0.9,
+            semantic_context=["plastic", "bottles", "wholesale", "supplier"]
+        )
+
+        title = analyzer.generate_intent_based_title(signal)
+
+        assert "plastic bottles wholesale supplier" in title.lower()
+        assert any(word in title.lower() for word in ["moq", "lead time", "certifications", "pricing"])
+        assert "what you need to know" not in title.lower()
+
     def test_expand_semantic_keywords(self):
         """Should expand keywords based on semantic context"""
         analyzer = SearchIntentAnalyzer()

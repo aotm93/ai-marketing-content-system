@@ -60,3 +60,27 @@ class TestHookOptimizerIntegration:
 
         # Should be problem-focused, not generic
         assert any(word in title.lower() for word in ["prevent", "failure", "solution", "cause"])
+
+    def test_buying_keyword_keeps_query_context(self):
+        """Should not fall back to generic data-style titles for supplier queries"""
+        optimizer = HookOptimizer()
+
+        topic = ContentTopic(
+            title="plastic bottles wholesale supplier",
+            angle="supplier selection for bulk orders",
+            hook_type=HookType.DATA,
+            industry="packaging",
+            target_audience="b2b buyers",
+            business_intent=0.85,
+            trend_score=0.6,
+            competition_score=0.5,
+            differentiation_score=0.7,
+            brand_alignment_score=0.8,
+            value_score=0.78
+        )
+
+        titles = optimizer.generate_optimized_titles_sync(topic, count=5)
+        best = next(title for title in titles if title.hook_type == HookType.DATA)
+
+        assert "data-driven insights" not in best.title.lower()
+        assert "plastic bottles wholesale supplier" in best.title.lower()

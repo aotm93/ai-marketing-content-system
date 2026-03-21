@@ -230,6 +230,18 @@ class ContentCreatorAgent(BaseAgent):
                 prompt += "- Include specific technical parameters and data\n"
             if content_reqs.get('require_standards'):
                 prompt += "- Reference industry standards\n"
+            if content_reqs.get('selection_criteria'):
+                prompt += "- Give explicit selection criteria readers can use to compare products or suppliers\n"
+            if content_reqs.get('supplier_evaluation'):
+                prompt += "- Include MOQ, lead time, certifications, QC process, sampling, and audit checkpoints\n"
+            if content_reqs.get('commercial_specifics'):
+                prompt += "- Explain quote structure, cost drivers, and red flags that affect B2B purchasing decisions\n"
+            if content_reqs.get('mechanism_analysis'):
+                prompt += "- Explain mechanism, failure mode, or process with technically precise language\n"
+            if content_reqs.get('test_methods'):
+                prompt += "- Mention test methods, standards, or measurement conditions where relevant\n"
+            if content_reqs.get('design_implications'):
+                prompt += "- Translate technical findings into design, manufacturing, or sourcing implications\n"
             if content_reqs.get('avoid_generic'):
                 prompt += "- Avoid generic advice like 'be careful' or 'follow best practices'\n"
                 prompt += "- Skip basic introductory explanations\n"
@@ -258,6 +270,14 @@ class ContentCreatorAgent(BaseAgent):
 5. **Expert Tone**: Demonstrate E-E-A-T (Experience, Expertise, Authoritativeness, Trust)
 6. **Rich Formatting**: Use H2, H3, bullet points, tables, and blockquotes
 7. **Internal Links**: Naturally mention 2-3 related articles with anchor text
+
+**NON-NEGOTIABLE VALUE RULES**:
+- Do NOT write generic filler such as broad market overviews, empty trend talk, or vague statements like "quality is important"
+- Every main section must answer a concrete decision question, such as what to choose, what causes failure, how to verify a supplier, what specs matter, or which trade-offs affect cost
+- If the keyword is commercial or supplier-oriented, include a comparison table or checklist covering MOQ, lead time, customization, compliance, quality control, and quotation factors
+- If the keyword is technical, include measurable parameters, operating conditions, failure causes, or test criteria instead of high-level summaries
+- If research data is limited, still provide a rigorous evaluation framework, inspection checklist, or decision matrix rather than generic prose
+- Avoid empty hype, trend cliches, and broad all-purpose explainer language unless directly supported by evidence
 
 **Products to Mention**:
 {products if products else 'None specified'}

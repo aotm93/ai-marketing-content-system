@@ -21,6 +21,15 @@ logger = logging.getLogger(__name__)
 class HookOptimizer:
     """Generate optimized titles with multiple hook variants"""
 
+    MIN_ACCEPTABLE_MATCH = 0.45
+    GENERIC_PATTERNS = (
+        "data-driven insights",
+        "what you need to know",
+        "ultimate guide",
+        "top picks reviewed",
+        "which is better?"
+    )
+
     # CTR baseline estimates by hook type
     CTR_BASELINES = {
         HookType.DATA: 0.045,
@@ -159,13 +168,13 @@ class HookOptimizer:
         hook_type: HookType
     ) -> tuple[str, str]:
         """Generate a title for a specific hook type using intent analysis"""
+        intent_signal = self.intent_analyzer.analyze_intent(
+            topic.title,
+            related_keywords=[topic.angle] if topic.angle else []
+        )
 
         # Use intent analyzer for PROBLEM and HOW_TO hooks
         if hook_type in [HookType.PROBLEM, HookType.HOW_TO]:
-            intent_signal = self.intent_analyzer.analyze_intent(
-                topic.title,
-                related_keywords=[topic.angle] if topic.angle else []
-            )
             title = self.intent_analyzer.generate_intent_based_title(intent_signal)
             rationale = f"Intent-based title for {intent_signal.intent.value} (confidence: {intent_signal.confidence:.0%})"
             return title, rationale
@@ -181,7 +190,15 @@ class HookOptimizer:
         try:
             title = template.format(**context)
         except KeyError:
-            title = self._generate_fallback_title(topic, hook_type)
+            title = self._generate_fallback_title(topic, hook_type, intent_signal)
+
+        if self._should_replace_generated_title(title, topic.title):
+            title = self._generate_fallback_title(topic, hook_type, intent_signal)
+            rationale = (
+                f"Keyword-anchored fallback for {hook_type.value} hook to preserve query intent "
+                f"({intent_signal.intent.value}, confidence: {intent_signal.confidence:.0%})"
+            )
+            return title, rationale
 
         rationale = self._generate_rationale(hook_type, context)
         return title, rationale
@@ -253,17 +270,43 @@ class HookOptimizer:
         
         return context
     
-    def _generate_fallback_title(self, topic: ContentTopic, hook_type: HookType) -> str:
+    def _generate_fallback_title(
+        self,
+        topic: ContentTopic,
+        hook_type: HookType,
+        intent_signal=None
+    ) -> str:
         """Generate a fallback title if template fails"""
+        keyword_title = self.intent_analyzer.generate_intent_based_title(intent_signal) if intent_signal else topic.title
         fallbacks = {
-            HookType.DATA: f"Data-Driven Insights: {topic.title}",
-            HookType.PROBLEM: f"Solving the {topic.title} Challenge",
-            HookType.HOW_TO: f"How to Master {topic.title}",
-            HookType.QUESTION: f"Is {topic.title} Right for You?",
-            HookType.STORY: f"The {topic.title} Success Story",
-            HookType.CONTROVERSY: f"Rethinking {topic.title}: A New Perspective"
+            HookType.DATA: f"{self._keyword_title(topic.title)}: Cost, Performance Data, and Buyer Benchmarks",
+            HookType.PROBLEM: keyword_title,
+            HookType.HOW_TO: keyword_title,
+            HookType.QUESTION: f"{self._keyword_title(topic.title)}: Key Questions, Trade-Offs, and Selection Criteria",
+            HookType.STORY: f"{self._keyword_title(topic.title)}: Case Examples, Lessons, and Implementation Takeaways",
+            HookType.CONTROVERSY: f"{self._keyword_title(topic.title)}: Common Assumptions, Risks, and Evidence-Based Trade-Offs"
         }
         return fallbacks.get(hook_type, topic.title)
+
+    def _keyword_title(self, keyword: str) -> str:
+        """Convert the raw keyword to a readable title while preserving acronyms."""
+        words = []
+        for raw_word in keyword.split():
+            upper_word = raw_word.upper()
+            if upper_word in {"HDPE", "LDPE", "PET", "PVC", "MOQ", "FDA", "OEM", "ODM"}:
+                words.append(upper_word)
+            else:
+                words.append(raw_word.capitalize())
+        return " ".join(words)
+
+    def _should_replace_generated_title(self, title: str, keyword: str) -> bool:
+        """Reject titles that are generic or weakly matched to the query."""
+        title_lower = title.lower()
+        if any(pattern in title_lower for pattern in self.GENERIC_PATTERNS):
+            return True
+
+        match_score = self.title_matcher.calculate_match_score(title, keyword)
+        return match_score < self.MIN_ACCEPTABLE_MATCH
     
     def _generate_rationale(self, hook_type: HookType, context: dict) -> str:
         """Generate rationale for why this hook type works"""
@@ -341,36 +384,45 @@ class HookOptimizer:
         if not variants:
             raise ValueError("No variants provided")
 
-        # If target_keyword provided, boost scores based on match
+        scored_variants = []
         if target_keyword:
             for variant in variants:
                 match_score = self.title_matcher.calculate_match_score(variant.title, target_keyword)
-                # Boost CTR by up to 20% based on match score
-                variant.expected_ctr = variant.expected_ctr * (1 + match_score * 0.2)
+                effective_ctr = variant.expected_ctr * (1 + match_score * 0.2)
+                if match_score < self.MIN_ACCEPTABLE_MATCH:
+                    effective_ctr *= 0.6
+                scored_variants.append((variant, effective_ctr, match_score))
+        else:
+            scored_variants = [(variant, variant.expected_ctr, 1.0) for variant in variants]
+
+        eligible_variants = [
+            item for item in scored_variants
+            if item[2] >= self.MIN_ACCEPTABLE_MATCH
+        ] or scored_variants
 
         if strategy == "ctr":
             # Pure CTR optimization
-            return max(variants, key=lambda x: x.expected_ctr)
+            return max(eligible_variants, key=lambda item: item[1])[0]
 
         elif strategy == "balanced":
             # Balance CTR with variety
             # Prefer data or problem hooks if CTR is close
-            best_ctr = max(variants, key=lambda x: x.expected_ctr)
+            best_variant = max(eligible_variants, key=lambda item: item[1])
 
-            for variant in variants:
+            for variant, effective_ctr, _ in eligible_variants:
                 if variant.hook_type in [HookType.DATA, HookType.PROBLEM]:
-                    if variant.expected_ctr >= best_ctr.expected_ctr * 0.95:
+                    if effective_ctr >= best_variant[1] * 0.95:
                         return variant
 
-            return best_ctr
+            return best_variant[0]
 
         elif strategy == "experimental":
             # Try less common hook types occasionally
             uncommon_hooks = [HookType.CONTROVERSY, HookType.STORY]
-            for variant in variants:
+            for variant, _, _ in eligible_variants:
                 if variant.hook_type in uncommon_hooks:
                     return variant
-            return max(variants, key=lambda x: x.expected_ctr)
+            return max(eligible_variants, key=lambda item: item[1])[0]
         
         else:
-            return max(variants, key=lambda x: x.expected_ctr)
+            return max(eligible_variants, key=lambda item: item[1])[0]

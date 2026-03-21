@@ -27,6 +27,18 @@ class ProfessionalContentWriter:
         UserIntent.COMPARISON: {
             "specific_metrics": True,
             "avoid_generic": True
+        },
+        UserIntent.BUYING_GUIDE: {
+            "selection_criteria": True,
+            "supplier_evaluation": True,
+            "commercial_specifics": True,
+            "avoid_generic": True
+        },
+        UserIntent.TECHNICAL_DEEP_DIVE: {
+            "mechanism_analysis": True,
+            "test_methods": True,
+            "design_implications": True,
+            "avoid_generic": True
         }
     }
 
@@ -65,6 +77,30 @@ Requirements:
 - Reference industry standards
 - Skip basic introductory explanations
 - Use structured format (lists/tables) for Featured Snippet eligibility
+
+Key points to cover: {', '.join(section.key_points)}"""
+
+        elif intent == UserIntent.BUYING_GUIDE:
+            return f"""Write a B2B buying guide section for: {section.title}
+
+Requirements:
+- Help the reader compare suppliers or product options
+- Include concrete criteria such as MOQ, lead time, certifications, tooling, and quality control
+- Explain trade-offs, red flags, and quote comparison logic
+- Avoid generic statements like "choose a reliable supplier"
+- Start with a concise answer or checklist-ready summary
+
+Key points to cover: {', '.join(section.key_points)}"""
+
+        elif intent == UserIntent.TECHNICAL_DEEP_DIVE:
+            return f"""Write a technical deep-dive section for: {section.title}
+
+Requirements:
+- Explain the mechanism, process, or failure mode precisely
+- Include measurement conditions, test methods, or relevant standards when possible
+- Translate technical findings into engineering or purchasing implications
+- Avoid basic overviews and filler language
+- Use structured formatting for specs, thresholds, or comparisons
 
 Key points to cover: {', '.join(section.key_points)}"""
 
