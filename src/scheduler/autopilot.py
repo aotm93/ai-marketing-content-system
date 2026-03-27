@@ -10,7 +10,7 @@ Features:
 """
 
 import logging
-from datetime import datetime, date
+from datetime import datetime, date, time, timedelta
 from typing import Dict, Any, Optional, Callable
 from dataclasses import dataclass
 from enum import Enum
@@ -166,6 +166,7 @@ class AutopilotScheduler:
         self._last_run: Optional[datetime] = None
         self._last_error_reset_date: date = date.today()
         self._paused_by_errors: bool = False
+        self._manually_paused: bool = False
         
         # Registered job functions
         self._job_functions: Dict[str, Callable] = {}
@@ -207,11 +208,12 @@ class AutopilotScheduler:
         if self.scheduler.running:
             logger.warning("Scheduler already running")
             return
-        
+
         self._schedule_jobs()
         self.scheduler.start()
         self.job_runner.enable()
-        
+        self._manually_paused = False
+
         logger.info("Autopilot scheduler started")
     
     def stop(self):
@@ -219,19 +221,52 @@ class AutopilotScheduler:
         if self.scheduler and self.scheduler.running:
             self.scheduler.shutdown(wait=False)
             self.job_runner.disable()
+            self._manually_paused = False
             logger.info("Autopilot scheduler stopped")
-    
+
     def pause(self):
         """Pause the scheduler without shutting down"""
         if self.scheduler:
             self.scheduler.pause()
-            logger.info("Autopilot scheduler paused")
-    
+            self._manually_paused = True
+            logger.info("Autopilot scheduler paused manually")
+
     def resume(self):
         """Resume a paused scheduler"""
         if self.scheduler:
             self.scheduler.resume()
-            logger.info("Autopilot scheduler resumed")
+        self._manually_paused = False
+
+        if self._paused_by_errors:
+            logger.info(
+                "Manual resume requested while auto-paused; clearing error pause state "
+                f"(was {self._consecutive_errors} consecutive errors)"
+            )
+            self._paused_by_errors = False
+            self._consecutive_errors = 0
+            self._last_error_reset_date = date.today()
+
+        logger.info("Autopilot scheduler resumed")
+
+    def _reset_error_pause_if_new_day(self):
+        """Reset automatic error pause state after the day boundary."""
+        today = date.today()
+        if today <= self._last_error_reset_date:
+            return
+
+        logger.info(f"New day detected, resetting error counter (was {self._consecutive_errors})")
+        self._consecutive_errors = 0
+        self._last_error_reset_date = today
+
+        if self._paused_by_errors:
+            logger.info("Clearing automatic error pause after daily reset")
+            self._paused_by_errors = False
+
+    def _get_auto_pause_until(self) -> Optional[datetime]:
+        """Return when automatic error pause expires."""
+        if not self._paused_by_errors:
+            return None
+        return datetime.combine(self._last_error_reset_date + timedelta(days=1), time.min)
     
     def _schedule_jobs(self):
         """Set up scheduled jobs based on config"""
@@ -290,18 +325,8 @@ class AutopilotScheduler:
 
         logger.info(f"Starting generation cycle #{self._total_runs}")
 
-        # Check if it's a new day - reset error counter and auto-resume if paused by errors
-        today = date.today()
-        if today > self._last_error_reset_date:
-            logger.info(f"New day detected, resetting error counter (was {self._consecutive_errors})")
-            self._consecutive_errors = 0
-            self._last_error_reset_date = today
-
-            # Auto-resume if paused by errors
-            if self._paused_by_errors:
-                logger.info("Auto-resuming scheduler after daily reset")
-                self._paused_by_errors = False
-                self.resume()
+        # Automatic error pauses should only block the current day.
+        self._reset_error_pause_if_new_day()
 
         # Check if within active hours
         current_hour = datetime.now().hour
@@ -309,11 +334,25 @@ class AutopilotScheduler:
             logger.info(f"Outside active hours ({self.config.active_hours_start}-{self.config.active_hours_end})")
             return
 
-        # Check consecutive errors threshold
+        if self._paused_by_errors:
+            auto_pause_until = self._get_auto_pause_until()
+            logger.warning(
+                "Skipping generation cycle because autopilot is auto-paused after "
+                f"{self._consecutive_errors} consecutive errors; next retry window starts at "
+                f"{auto_pause_until.isoformat() if auto_pause_until else 'the next day'}"
+            )
+            return
+
+        # Check consecutive errors threshold. We intentionally do not pause the
+        # APScheduler itself here, otherwise the next day's recovery cycle never fires.
         if self._consecutive_errors >= self.config.pause_on_errors:
-            logger.warning(f"Paused due to {self._consecutive_errors} consecutive errors")
             self._paused_by_errors = True
-            self.pause()
+            auto_pause_until = self._get_auto_pause_until()
+            logger.warning(
+                "Auto-pausing content generation for the rest of the day after "
+                f"{self._consecutive_errors} consecutive errors; next retry window starts at "
+                f"{auto_pause_until.isoformat() if auto_pause_until else 'the next day'}"
+            )
             return
 
         try:
@@ -420,6 +459,11 @@ class AutopilotScheduler:
             "successful_runs_today": self._successful_runs,
             "consecutive_errors": self._consecutive_errors,
             "paused_by_errors": self._paused_by_errors,
+            "manually_paused": self._manually_paused,
+            "auto_pause_until": (
+                self._get_auto_pause_until().isoformat()
+                if self._get_auto_pause_until() else None
+            ),
             "last_run": self._last_run.isoformat() if self._last_run else None,
             "last_error_reset_date": self._last_error_reset_date.isoformat(),
             "registered_jobs": list(self._job_functions.keys()),
