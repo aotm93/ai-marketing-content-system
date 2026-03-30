@@ -9,7 +9,7 @@ and executed by JobRunner.
 import logging
 import re
 from typing import Dict, Any, Optional, List
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from src.config import settings
 from src.integrations import WordPressAdapter
