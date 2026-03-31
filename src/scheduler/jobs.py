@@ -625,17 +625,25 @@ def _load_rotation_history(db, key: str) -> List[str]:
     return []
 
 
+def _dedupe_rotation_history(values: List[str]) -> List[str]:
+    """Keep rotation history unique while preserving the most recent occurrence."""
+    normalized = []
+    for item in values:
+        value = _normalize_rotation_value(item)
+        if not value:
+            continue
+        if value in normalized:
+            normalized.remove(value)
+        normalized.append(value)
+    return normalized[-ROTATION_HISTORY_LIMIT:]
+
+
 def _save_rotation_history(db, key: str, values: List[str]) -> None:
     """Persist recent selections for cross-restart anti-repeat behavior."""
     try:
         from src.models.config import SystemConfig
 
-        normalized = []
-        for item in values:
-            value = _normalize_rotation_value(item)
-            if value and value not in normalized:
-                normalized.append(value)
-        normalized = normalized[-ROTATION_HISTORY_LIMIT:]
+        normalized = _dedupe_rotation_history(values)
 
         config = db.query(SystemConfig).filter(SystemConfig.key == key).first()
         payload = json.dumps(normalized, ensure_ascii=True)
