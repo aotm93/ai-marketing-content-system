@@ -52,7 +52,11 @@ Update `{@artifacts_path}/plan.md`.
 - 阻塞问题：`src/scheduler/jobs.py` 中 rotation history 的持久化去重会保留旧顺序，重复命中的 seed/topic 不会刷新到最近位置，仍可能在后续重启后再次过早被选中，合并前应修复。
 - 验证结果：在设置 `DATABASE_URL=sqlite:///test.db` 后执行 `python -m pytest tests/services/content/test_hook_optimizer_integration.py tests/unit/services/test_keyword_strategy_routing.py tests/agents/test_content_creator_integration.py`，11 项测试通过。
 
-### [ ] Step: 合并代码到main
+### [x] Step: ?????main
 <!-- chat-id: 70ad2ade-10cd-4cc0-ac83-13fefbee7fe4 -->
 
 测试没有问题合并完整代码到main, 并且提交推送
+
+- ?? `new-task-668d` ????? `main`?
+- ??? `DATABASE_URL=sqlite:///test.db` ? 13 ????????
+- ????????????????
