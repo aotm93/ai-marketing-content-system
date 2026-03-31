@@ -103,3 +103,36 @@ class TestHookOptimizerIntegration:
         assert "data-driven insights" not in best.title.lower()
         assert "plastic bottles wholesale supplier" in best.title.lower()
         assert any(term in best.title.lower() for term in ["moq", "lead time", "certification", "buyer"])
+
+    def test_catalog_title_is_trimmed_for_seo_and_repetition(self):
+        """Long repetitive product queries should be compacted to SEO-safe titles."""
+        optimizer = HookOptimizer()
+
+        topic = ContentTopic(
+            title="30ml PET 30ml 60ml 100ml white black pump white lid plastic foam bottle empty shampoo container wholesale",
+            angle="supplier comparison",
+            hook_type=HookType.DATA,
+            industry="packaging",
+            target_audience="b2b buyers",
+            business_intent=0.9,
+            trend_score=0.6,
+            competition_score=0.4,
+            differentiation_score=0.8,
+            brand_alignment_score=0.8,
+            value_score=0.82,
+        )
+
+        titles = optimizer.generate_optimized_titles_sync(
+            topic,
+            count=3,
+            catalog_context={
+                "page_type": "wholesale_faq",
+                "decision_questions": ["What MOQ and lead time should buyers compare?"],
+            },
+        )
+        best = next(title for title in titles if title.hook_type == HookType.DATA)
+
+        assert len(best.title) <= 68
+        assert best.title.lower().count("30ml") <= 1
+        assert "moq" in best.title.lower()
+        assert "lead time" in best.title.lower()

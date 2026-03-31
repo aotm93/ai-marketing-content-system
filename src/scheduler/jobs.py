@@ -7,6 +7,8 @@ and executed by JobRunner.
 """
 
 import logging
+import json
+import random
 import re
 from typing import Dict, Any, Optional, List
 from datetime import datetime, timedelta
@@ -23,6 +25,8 @@ _website_profile_cache = {
     "timestamp": None,
     "default_cache_duration": 604800  # 7 days in seconds (default)
 }
+
+ROTATION_HISTORY_LIMIT = 24
 
 
 def get_website_analysis_cache_duration() -> int:
@@ -600,7 +604,89 @@ def _score_catalog_context_for_selection(keyword: str, catalog_context: Dict[str
     return round(min(score, 1.0), 3)
 
 
-def _select_best_content_candidate(candidates: list):
+def _normalize_rotation_value(value: str) -> str:
+    """Normalize history keys so restart-level rotation remains stable."""
+    return re.sub(r"\s+", " ", (value or "").strip().lower())
+
+
+def _load_rotation_history(db, key: str) -> List[str]:
+    """Read recent selections from SystemConfig; fallback to empty on parse errors."""
+    try:
+        from src.models.config import SystemConfig
+
+        config = db.query(SystemConfig).filter(SystemConfig.key == key).first()
+        if not config or not config.value:
+            return []
+        values = json.loads(config.value)
+        if isinstance(values, list):
+            return [_normalize_rotation_value(str(item)) for item in values if str(item).strip()]
+    except Exception as exc:
+        logger.debug(f"Failed to read rotation history for {key}: {exc}")
+    return []
+
+
+def _save_rotation_history(db, key: str, values: List[str]) -> None:
+    """Persist recent selections for cross-restart anti-repeat behavior."""
+    try:
+        from src.models.config import SystemConfig
+
+        normalized = []
+        for item in values:
+            value = _normalize_rotation_value(item)
+            if value and value not in normalized:
+                normalized.append(value)
+        normalized = normalized[-ROTATION_HISTORY_LIMIT:]
+
+        config = db.query(SystemConfig).filter(SystemConfig.key == key).first()
+        payload = json.dumps(normalized, ensure_ascii=True)
+        if config:
+            config.value = payload
+            config.data_type = "json"
+            config.updated_at = datetime.now()
+        else:
+            db.add(
+                SystemConfig(
+                    key=key,
+                    value=payload,
+                    data_type="json",
+                    description="Autopilot rotation history",
+                )
+            )
+        db.commit()
+    except Exception as exc:
+        logger.debug(f"Failed to save rotation history for {key}: {exc}")
+        db.rollback()
+
+
+def _select_with_rotation(
+    candidates: List[Any],
+    item_key_getter,
+    db,
+    history_key: str,
+    top_window: int = 5,
+    recent_window: int = 6,
+) -> Optional[Any]:
+    """Pick randomly from top candidates while avoiding recently used items across restarts."""
+    if not candidates:
+        return None
+
+    ranked_pool = candidates[:max(1, min(top_window, len(candidates)))]
+    history = _load_rotation_history(db, history_key)
+    recent_set = set(history[-recent_window:])
+
+    fresh_pool = [
+        candidate for candidate in ranked_pool
+        if _normalize_rotation_value(item_key_getter(candidate)) not in recent_set
+    ]
+    selection_pool = fresh_pool or ranked_pool
+    selected = random.choice(selection_pool)
+
+    selected_key = _normalize_rotation_value(item_key_getter(selected))
+    _save_rotation_history(db, history_key, history + [selected_key])
+    return selected
+
+
+def _select_best_content_candidate(candidates: list, db=None):
     """Choose the content-aware keyword that best combines routing and commercial value."""
     if not candidates:
         return None
@@ -615,7 +701,17 @@ def _select_best_content_candidate(candidates: list):
         ),
         reverse=True,
     )
-    return ranked[0]
+    if not db:
+        return ranked[0]
+
+    return _select_with_rotation(
+        candidates=ranked,
+        item_key_getter=lambda candidate: getattr(candidate, "keyword", ""),
+        db=db,
+        history_key="autopilot_recent_content_candidates",
+        top_window=6,
+        recent_window=8,
+    ) or ranked[0]
 
 
 def _infer_route_coverage_counts(keywords: list, website_profile) -> Dict[str, int]:
@@ -1045,7 +1141,7 @@ async def content_generation_job(data: Dict[str, Any]) -> Dict[str, Any]:
                     )
 
                 if available_candidates:
-                    selected = _select_best_content_candidate(available_candidates)
+                    selected = _select_best_content_candidate(available_candidates, db=db)
 
                     target_keyword = selected.keyword
                     target_context = {
@@ -1138,11 +1234,20 @@ async def content_generation_job(data: Dict[str, Any]) -> Dict[str, Any]:
                 from src.integrations.keyword_client import KeywordClient
                 kw_client = KeywordClient()
 
-                # Use first product category as seed (dynamic)
+                # Use rotating seed selection to avoid repeating the same bootstrap query after restart/redeploy.
                 seed = "packaging bottles"
                 if website_profile and website_profile.product_categories:
-                    seed = website_profile.product_categories[0]
-                    logger.info(f"Using dynamic seed from website: {seed}")
+                    seed_candidates = [category for category in website_profile.product_categories if category]
+                    rotated_seed = _select_with_rotation(
+                        candidates=seed_candidates,
+                        item_key_getter=lambda item: item,
+                        db=db,
+                        history_key="autopilot_recent_keyword_seeds",
+                        top_window=8,
+                        recent_window=8,
+                    )
+                    seed = rotated_seed or seed_candidates[0]
+                    logger.info(f"Using dynamic rotating seed from website: {seed}")
 
                 suggestions = await kw_client.get_easy_wins(seed)
 
@@ -1272,66 +1377,73 @@ async def content_generation_job(data: Dict[str, Any]) -> Dict[str, Any]:
                 )
                 
                 if topics:
-                    # Select highest value unused topic
-                    for topic in topics:
-                        if topic.title.lower() not in used_keyword_set:
-                            selected_topic = topic
-                            target_keyword = topic.title
-                            ci_catalog_context = _match_catalog_context(topic.title, website_profile)
-                            
-                            # Generate optimized title variants using HookOptimizer
-                            logger.info(f"Generating optimized title variants for: {topic.title}")
-                            optimized_titles = await hook_optimizer.generate_optimized_titles(
-                                topic,
-                                count=5,
-                                catalog_context=ci_catalog_context,
-                            )
-                            
-                            # Select best title based on CTR strategy
-                            best_title = await hook_optimizer.select_best_title(optimized_titles, strategy="balanced", target_keyword=target_keyword)
-                            
-                            # Create unified SEOContext
-                            seo_context = SEOContext(
-                                content_id=f"ci_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{topic.title[:30]}",
-                                source="ContentIntelligence",
-                                industry=industry,
-                                target_audience=audience,
-                                target_keyword=topic.title,  # Use topic title as focus keyword
-                                topic_title=topic.title,
-                                optimized_titles=optimized_titles,
-                                selected_title=best_title.title,
-                                selected_title_variant=best_title.test_variant,
-                                title_hook_type=best_title.hook_type,
-                                title_ctr_estimate=best_title.expected_ctr,
-                                research_result=topic.research_result,
-                                outline=topic.outline,
-                                value_score=topic.value_score,
-                                business_intent=topic.business_intent,
-                                status=SEOElementStatus.GENERATED
-                            )
-                            _apply_catalog_context_to_seo_context(
-                                seo_context,
-                                ci_catalog_context
-                            )
-                            
-                            target_context = {
-                                "source": "ContentIntelligence (Research-Based)",
-                                "metric": f"Value Score: {topic.value_score:.2f}, Business Intent: {topic.business_intent:.2f}",
-                                "research_sources": [s.name for s in topic.research_sources],
-                                "selected_title": best_title.title,
-                                "title_variant": best_title.test_variant,
-                                "hook_type": best_title.hook_type.value,
-                                "ctr_estimate": best_title.expected_ctr,
-                                "outline": topic.outline.dict() if topic.outline else None,
-                                "research_result": topic.research_result.dict() if topic.research_result else None,
-                                "optimized_titles_count": len(optimized_titles),
-                                "target_category": seo_context.target_category_name,
-                                "target_tag": seo_context.target_tag_name,
-                                "supporting_products": [p.get("name") for p in seo_context.supporting_products],
-                            }
-                            logger.info(f"Selected research-based topic: {target_keyword}")
-                            logger.info(f"Optimized title: {best_title.title} (CTR: {best_title.expected_ctr:.3f}, Hook: {best_title.hook_type.value})")
-                            break
+                    available_topics = [topic for topic in topics if topic.title.lower() not in used_keyword_set]
+                    topic = _select_with_rotation(
+                        candidates=available_topics,
+                        item_key_getter=lambda item: item.title,
+                        db=db,
+                        history_key="autopilot_recent_ci_topics",
+                        top_window=5,
+                        recent_window=8,
+                    )
+
+                    if topic:
+                        selected_topic = topic
+                        target_keyword = topic.title
+                        ci_catalog_context = _match_catalog_context(topic.title, website_profile)
+
+                        # Generate optimized title variants using HookOptimizer
+                        logger.info(f"Generating optimized title variants for: {topic.title}")
+                        optimized_titles = await hook_optimizer.generate_optimized_titles(
+                            topic,
+                            count=5,
+                            catalog_context=ci_catalog_context,
+                        )
+
+                        # Select best title based on CTR strategy
+                        best_title = await hook_optimizer.select_best_title(optimized_titles, strategy="balanced", target_keyword=target_keyword)
+
+                        # Create unified SEOContext
+                        seo_context = SEOContext(
+                            content_id=f"ci_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{topic.title[:30]}",
+                            source="ContentIntelligence",
+                            industry=industry,
+                            target_audience=audience,
+                            target_keyword=topic.title,  # Use topic title as focus keyword
+                            topic_title=topic.title,
+                            optimized_titles=optimized_titles,
+                            selected_title=best_title.title,
+                            selected_title_variant=best_title.test_variant,
+                            title_hook_type=best_title.hook_type,
+                            title_ctr_estimate=best_title.expected_ctr,
+                            research_result=topic.research_result,
+                            outline=topic.outline,
+                            value_score=topic.value_score,
+                            business_intent=topic.business_intent,
+                            status=SEOElementStatus.GENERATED
+                        )
+                        _apply_catalog_context_to_seo_context(
+                            seo_context,
+                            ci_catalog_context
+                        )
+
+                        target_context = {
+                            "source": "ContentIntelligence (Research-Based)",
+                            "metric": f"Value Score: {topic.value_score:.2f}, Business Intent: {topic.business_intent:.2f}",
+                            "research_sources": [s.name for s in topic.research_sources],
+                            "selected_title": best_title.title,
+                            "title_variant": best_title.test_variant,
+                            "hook_type": best_title.hook_type.value,
+                            "ctr_estimate": best_title.expected_ctr,
+                            "outline": topic.outline.dict() if topic.outline else None,
+                            "research_result": topic.research_result.dict() if topic.research_result else None,
+                            "optimized_titles_count": len(optimized_titles),
+                            "target_category": seo_context.target_category_name,
+                            "target_tag": seo_context.target_tag_name,
+                            "supporting_products": [p.get("name") for p in seo_context.supporting_products],
+                        }
+                        logger.info(f"Selected research-based topic: {target_keyword}")
+                        logger.info(f"Optimized title: {best_title.title} (CTR: {best_title.expected_ctr:.3f}, Hook: {best_title.hook_type.value})")
                 
                 if not target_keyword:
                     logger.warning("Content Intelligence generated no unused topics, falling back to emergency")

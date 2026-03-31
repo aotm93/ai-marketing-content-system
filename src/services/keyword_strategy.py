@@ -11,6 +11,7 @@ Features:
 """
 
 import logging
+import re
 from typing import List, Dict, Any, Set, Optional
 from dataclasses import dataclass, field
 from enum import Enum
@@ -87,6 +88,14 @@ class ContentAwareKeywordGenerator:
         self.website_profile = website_profile
         self.catalog_matcher = ProductCatalogMatcher()
         logger.info("ContentAwareKeywordGenerator initialized")
+
+    PRODUCT_TERM_PATTERN = re.compile(
+        r"(fine mist spray bottle|spray bottle|foam bottle|pump bottle|dropper bottle|"
+        r"lotion bottle|bottle|jar|container|tube|sprayer|pump|foamer)",
+        re.IGNORECASE,
+    )
+    CAPACITY_PATTERN = re.compile(r"\b(\d+(?:\.\d+)?)\s*(ml|l|oz|g)\b", re.IGNORECASE)
+    DESCRIPTOR_DROP_TERMS = {"empty", "wholesale", "container", "containers"}
 
     def set_website_profile(self, profile):
         """Update website profile"""
@@ -481,10 +490,112 @@ class ContentAwareKeywordGenerator:
         return min(score, 1.0)
 
     def _build_product_keyword_descriptor(self, product) -> str:
-        """Create a readable product-led keyword descriptor."""
-        parts = [product.capacity, product.material, product.name]
-        descriptor = " ".join(part for part in parts if part).strip()
+        """Create a compact, SEO-friendly product descriptor without repeated prefixes."""
+        capacity_phrase = self._extract_capacity_phrase(product)
+        material = self._normalize_acronym_token(getattr(product, "material", ""))
+        product_term = self._extract_product_term_phrase(product)
+
+        parts: List[str] = []
+        for part in [capacity_phrase, material, product_term]:
+            normalized = part.strip()
+            if normalized and normalized.lower() not in self.DESCRIPTOR_DROP_TERMS and normalized not in parts:
+                parts.append(normalized)
+
+        if not parts:
+            name = (getattr(product, "name", "") or "").strip()
+            parts = [token for token in name.split()[:6] if token]
+
+        descriptor = " ".join(parts)
+        descriptor = re.sub(r"\s+", " ", descriptor).strip()
         return descriptor[:120]
+
+    def _extract_capacity_phrase(self, product) -> str:
+        """Build a single capacity phrase from explicit and inferred capacity values."""
+        raw_values: List[str] = []
+        if getattr(product, "capacity", None):
+            raw_values.append(str(product.capacity))
+
+        name = str(getattr(product, "name", "") or "")
+        for amount, unit in self.CAPACITY_PATTERN.findall(name):
+            raw_values.append(f"{amount}{unit.lower()}")
+
+        normalized = []
+        for value in raw_values:
+            compact = re.sub(r"\s+", "", value.lower())
+            match = self.CAPACITY_PATTERN.search(compact)
+            if not match:
+                continue
+            normalized_value = f"{match.group(1)}{match.group(2).lower()}"
+            if normalized_value not in normalized:
+                normalized.append(normalized_value)
+
+        if not normalized:
+            return ""
+        if len(normalized) == 1:
+            return normalized[0]
+
+        first_match = self.CAPACITY_PATTERN.search(normalized[0])
+        if first_match:
+            shared_unit = first_match.group(2).lower()
+            numeric_values = []
+            for item in normalized:
+                match = self.CAPACITY_PATTERN.search(item)
+                if not match or match.group(2).lower() != shared_unit:
+                    numeric_values = []
+                    break
+                numeric_values.append(float(match.group(1)))
+            if len(numeric_values) >= 2:
+                return f"{self._format_number(min(numeric_values))}-{self._format_number(max(numeric_values))}{shared_unit}"
+
+        return "/".join(normalized[:2])
+
+    def _extract_product_term_phrase(self, product) -> str:
+        """Infer the core product term (e.g. spray bottle, foam bottle)."""
+        closure = str(getattr(product, "closure_type", "") or "")
+        name = str(getattr(product, "name", "") or "")
+        if not (closure or name):
+            return ""
+
+        # Prefer product-name matches so we keep a noun like "bottle" instead of only "pump".
+        match = self.PRODUCT_TERM_PATTERN.search(name)
+        if not match and closure:
+            match = self.PRODUCT_TERM_PATTERN.search(closure)
+        if match:
+            term = match.group(1)
+            if term.lower() in {"pump", "sprayer", "foamer"}:
+                noun_match = re.search(
+                    r"(?:[a-z]+\s+){0,2}(bottle|jar|container|tube)",
+                    name,
+                    re.IGNORECASE,
+                )
+                if noun_match:
+                    return self._normalize_acronym_token(noun_match.group(0))
+            return self._normalize_acronym_token(term)
+
+        tokens = [token for token in name.split() if token]
+        return self._normalize_acronym_token(" ".join(tokens[-2:])) if tokens else ""
+
+    def _normalize_acronym_token(self, text: str) -> str:
+        """Preserve packaging acronyms while keeping other tokens readable."""
+        if not text:
+            return ""
+        acronyms = {"hdpe", "ldpe", "pet", "pvc", "pp", "abs", "oem", "odm"}
+        words = []
+        for raw in text.split():
+            cleaned = raw.strip()
+            if not cleaned:
+                continue
+            if cleaned.lower() in acronyms:
+                words.append(cleaned.upper())
+            else:
+                words.append(cleaned.capitalize())
+        return " ".join(words)
+
+    def _format_number(self, value: float) -> str:
+        """Render float values without trailing .0."""
+        if value.is_integer():
+            return str(int(value))
+        return str(round(value, 2)).rstrip("0").rstrip(".")
 
     def _default_required_sections(self, page_type: str) -> List[str]:
         """Map page types to required content sections."""

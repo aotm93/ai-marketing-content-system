@@ -1,4 +1,5 @@
 from typing import Dict, Any, Optional, List
+import hashlib
 import logging
 from .base_agent import BaseAgent
 from src.services.content.professional_writer import ProfessionalContentWriter
@@ -12,6 +13,36 @@ class ContentCreatorAgent(BaseAgent):
     Content Creator Agent - Acts as the Content Writer
     Creates SEO-optimized content with full SEO context synchronization
     """
+    EDITORIAL_BLUEPRINTS = [
+        {
+            "name": "diagnostic_playbook",
+            "opening": "Start with a direct verdict, then map the top 3 failure triggers or buying risks.",
+            "flow": "Use a diagnostic table before recommendations; each section ends with a 'what to do next' note.",
+            "evidence": "Prioritize measurements, thresholds, and supplier validation checks over narrative fluff.",
+            "closing": "Close with a decision tree that routes readers to category, tag, or product pages.",
+        },
+        {
+            "name": "procurement_briefing",
+            "opening": "Open with a procurement snapshot: MOQ, lead time, and compliance implications in one paragraph.",
+            "flow": "Structure sections as briefing modules (cost, quality, risk, timeline, negotiation).",
+            "evidence": "Use short benchmark bullets and one comparison matrix per major decision point.",
+            "closing": "End with a shortlist protocol and clear CTA sequencing for next actions.",
+        },
+        {
+            "name": "spec_tradeoff_lab",
+            "opening": "Open with the key tradeoff readers are likely to face when choosing options.",
+            "flow": "Alternate between spec explanation and application scenarios to avoid repetitive structure.",
+            "evidence": "Include pass/fail conditions, test methods, and not-recommended scenarios.",
+            "closing": "Conclude with a fit-by-scenario checklist that maps to concrete next pages.",
+        },
+        {
+            "name": "buyer_qa_interview",
+            "opening": "Start with answer-first Q&A style so buyers get practical guidance immediately.",
+            "flow": "Use section headers phrased as buyer questions, then answer with criteria and examples.",
+            "evidence": "Ground answers with concrete data, qualification questions, and red-flag signals.",
+            "closing": "Finish with a ranked next-step path (browse, shortlist, validate, quote).",
+        },
+    ]
 
     def __init__(self, name: str = "ContentCreator", ai_provider=None, event_bus=None, **kwargs):
         super().__init__(name=name, ai_provider=ai_provider, event_bus=event_bus)
@@ -145,6 +176,12 @@ class ContentCreatorAgent(BaseAgent):
         
         # Build hook-specific guidance
         hook_guidance = self._get_hook_guidance(hook_type)
+        editorial_blueprint = self._select_editorial_blueprint(
+            keyword=keyword,
+            title_must_use=title_must_use,
+            page_type=page_type,
+            hook_type=hook_type,
+        )
         
         # Base prompt with mandatory title usage
         prompt = f"""# CONTENT CREATION TASK - SYNCHRONIZED SEO
@@ -162,6 +199,14 @@ class ContentCreatorAgent(BaseAgent):
 3. **HOOK TYPE ALIGNMENT**:
    Type: {hook_type or 'general'}
    {hook_guidance}
+
+4. **EDITORIAL BLUEPRINT (ANTI-TEMPLATE MODE)**:
+   - Blueprint: {editorial_blueprint['name']}
+   - Opening approach: {editorial_blueprint['opening']}
+   - Section flow: {editorial_blueprint['flow']}
+   - Evidence pattern: {editorial_blueprint['evidence']}
+   - Closing pattern: {editorial_blueprint['closing']}
+   - Do NOT fall back to one-size-fits-all article sequencing.
 
 ## RESEARCH DATA
 """
@@ -434,6 +479,19 @@ Write the complete article now:
 """
         
         return prompt
+
+    def _select_editorial_blueprint(
+        self,
+        keyword: str,
+        title_must_use: str,
+        page_type: str,
+        hook_type: Optional[str],
+    ) -> Dict[str, str]:
+        """Select a deterministic blueprint to diversify structure across articles."""
+        key = f"{keyword}|{title_must_use}|{page_type}|{hook_type or 'general'}"
+        digest = hashlib.md5(key.encode("utf-8")).hexdigest()
+        index = int(digest[:8], 16) % len(self.EDITORIAL_BLUEPRINTS)
+        return self.EDITORIAL_BLUEPRINTS[index]
 
     def _format_products_for_prompt(self, products: list) -> str:
         """Format product examples for prompt readability."""

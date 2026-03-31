@@ -150,3 +150,40 @@ class TestKeywordStrategyRouting:
 
         assert post_scores["tag"] > pre_scores["tag"]
         assert post_scores["tag"] - pre_scores["tag"] > post_scores["category"] - pre_scores["category"]
+
+    def test_product_descriptor_is_compact_and_non_repetitive(self):
+        profile = WebsiteProfile(
+            product_categories=["foam bottles"],
+            industry_terms=["wholesale"],
+            content_themes=["supplier selection"],
+            target_audience="B2B buyers",
+            business_type="packaging supplier",
+            sample_keywords=["foam bottle wholesale"],
+            customer_pain_points=["reducing lead time risk"],
+            category_details=[],
+            tag_details=[],
+            product_records=[],
+        )
+        generator = ContentAwareKeywordGenerator(profile)
+
+        product = ProductInsight(
+            id=22,
+            name="30ml 60ml 100ml White Black Pump White Lid Plastic Foam Bottle Empty Shampoo Container Wholesale",
+            slug="foam-bottle-wholesale",
+            url="https://example.com/product/foam-bottle",
+            category_names=["Foam Bottles"],
+            tag_names=["PET"],
+            material="PET",
+            capacity="30ml",
+            closure_type="Pump",
+            use_case="Shampoo",
+            moq="10000",
+            lead_time="15-20 days",
+        )
+
+        descriptor = generator._build_product_keyword_descriptor(product)
+
+        assert "30-100ml" in descriptor
+        assert "PET" in descriptor
+        assert "Bottle" in descriptor
+        assert len(descriptor.split()) <= 6

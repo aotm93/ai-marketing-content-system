@@ -6,6 +6,7 @@ Generates optimized titles with multiple hook types and CTR estimation.
 
 import logging
 import random
+import re
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 
@@ -22,6 +23,8 @@ class HookOptimizer:
     """Generate optimized titles with multiple hook variants"""
 
     MIN_ACCEPTABLE_MATCH = 0.45
+    MAX_SEO_TITLE_LENGTH = 68
+    MAX_SUBJECT_WORDS = 8
     GENERIC_PATTERNS = (
         "data-driven insights",
         "what you need to know",
@@ -45,6 +48,11 @@ class HookOptimizer:
         "customization", "material", "capacity", "closure", "qc",
         "certifications", "audit", "checklist"
     ]
+    KEY_SUBJECT_TERMS = {
+        "bottle", "bottles", "jar", "jars", "container", "containers", "tube", "tubes",
+        "spray", "pump", "foamer", "foam", "dropper", "lotion", "supplier", "wholesale",
+        "manufacturer", "packaging"
+    }
     
     def __init__(self):
         self.title_templates = self._load_title_templates()
@@ -189,13 +197,14 @@ class HookOptimizer:
             catalog_context=catalog_context or {},
         )
         if catalog_title:
-            return catalog_title
+            title, rationale = catalog_title
+            return self._finalize_title(title, topic.title), rationale
 
         # Use intent analyzer for PROBLEM and HOW_TO hooks
         if hook_type in [HookType.PROBLEM, HookType.HOW_TO]:
             title = self.intent_analyzer.generate_intent_based_title(intent_signal)
             rationale = f"Intent-based title for {intent_signal.intent.value} (confidence: {intent_signal.confidence:.0%})"
-            return title, rationale
+            return self._finalize_title(title, topic.title), rationale
 
         # Use templates for DATA and other hooks
         templates = self.title_templates.get(hook_type, [])
@@ -216,10 +225,118 @@ class HookOptimizer:
                 f"Keyword-anchored fallback for {hook_type.value} hook to preserve query intent "
                 f"({intent_signal.intent.value}, confidence: {intent_signal.confidence:.0%})"
             )
-            return title, rationale
+            return self._finalize_title(title, topic.title), rationale
 
         rationale = self._generate_rationale(hook_type, context)
-        return title, rationale
+        return self._finalize_title(title, topic.title), rationale
+
+    def _finalize_title(self, title: str, keyword: str) -> str:
+        """Normalize repetitive tokens and keep title length within SEO-friendly bounds."""
+        cleaned = re.sub(r"\s+", " ", (title or "").strip())
+        cleaned = self._remove_repeated_tokens(cleaned)
+
+        if ":" in cleaned:
+            subject, tail = cleaned.split(":", 1)
+            subject = self._compact_subject(subject, keyword)
+            tail = self._shorten_tail(tail)
+            rebuilt = f"{subject}: {tail}" if tail else subject
+        else:
+            rebuilt = self._compact_subject(cleaned, keyword)
+
+        if len(rebuilt) > self.MAX_SEO_TITLE_LENGTH:
+            rebuilt = self._truncate_title(rebuilt, self.MAX_SEO_TITLE_LENGTH)
+        return rebuilt
+
+    def _remove_repeated_tokens(self, text: str) -> str:
+        """Remove repeated words like '30ml PET 30ml ...' while preserving useful connectors."""
+        tokens = text.split()
+        seen = set()
+        keep_repeat = {"and", "&", "for", "to", "vs", "with", "or"}
+        deduped = []
+        for token in tokens:
+            normalized = token.lower().strip(",.;:()[]{}")
+            if normalized and normalized not in keep_repeat and normalized in seen:
+                continue
+            deduped.append(token)
+            if normalized:
+                seen.add(normalized)
+        return " ".join(deduped)
+
+    def _compact_subject(self, subject: str, keyword: str) -> str:
+        """Prefer a compact keyword-led subject when the generated subject is bloated."""
+        subject = subject.strip(" ,-")
+        if len(subject.split()) <= self.MAX_SUBJECT_WORDS and len(subject) <= 44:
+            return subject
+
+        source = keyword or subject
+        tokens = source.split()
+        important = []
+        fallback = []
+        for token in tokens:
+            normalized = token.lower().strip(",.;:()[]{}")
+            if not normalized:
+                continue
+            if token not in fallback:
+                fallback.append(token)
+            if re.match(r"^\d+(?:\.\d+)?(?:ml|l|oz|g)$", normalized):
+                important.append(token)
+                continue
+            if normalized.upper() in {"HDPE", "LDPE", "PET", "PVC", "MOQ", "FDA", "OEM", "ODM"}:
+                important.append(token.upper())
+                continue
+            if normalized in self.KEY_SUBJECT_TERMS:
+                important.append(token)
+
+        compact_tokens = []
+        for token in important + fallback:
+            normalized = token.lower().strip(",.;:()[]{}")
+            if normalized and normalized not in {t.lower().strip(",.;:()[]{}") for t in compact_tokens}:
+                compact_tokens.append(token)
+            if len(compact_tokens) >= self.MAX_SUBJECT_WORDS:
+                break
+
+        compact_subject = " ".join(compact_tokens) if compact_tokens else subject
+        return self._keyword_title(compact_subject).strip()
+
+    def _shorten_tail(self, tail: str) -> str:
+        """Compress long tails so titles stay readable in SERP snippets."""
+        shortcuts = {
+            "Buyer Benchmarks": "Buyer Checks",
+            "Selection Criteria": "Selection Guide",
+            "Supplier Questions": "Supplier Checks",
+            "Performance Data": "Performance",
+            "The Questions Buyers Should Ask": "Buyer Questions",
+            "Common Buying Mistakes": "Buying Mistakes",
+            "Trade-Offs": "Tradeoffs",
+        }
+        tail_text = self._remove_repeated_tokens(tail.strip(" ,-"))
+        for source, target in shortcuts.items():
+            tail_text = tail_text.replace(source, target)
+
+        segments = [segment.strip() for segment in tail_text.split(",") if segment.strip()]
+        if len(segments) > 3:
+            segments = segments[:3]
+        compact = ", ".join(segments)
+
+        if "buyer checks" in compact.lower() and len(compact) > 34:
+            essentials = []
+            if "moq" in compact.lower():
+                essentials.append("MOQ")
+            if "lead time" in compact.lower():
+                essentials.append("Lead Time")
+            essentials.append("Buyer Checks")
+            compact = ", ".join(essentials)
+
+        if len(compact) > 34:
+            compact = self._truncate_title(compact, 34)
+        return compact
+
+    def _truncate_title(self, title: str, max_length: int) -> str:
+        """Trim title at word boundaries and avoid punctuation tails."""
+        if len(title) <= max_length:
+            return title
+        trimmed = title[:max_length].rsplit(" ", 1)[0].strip(",;:- ")
+        return trimmed or title[:max_length].strip(",;:- ")
 
     def _generate_catalog_anchored_title(
         self,
@@ -290,36 +407,36 @@ class HookOptimizer:
         """Choose a hook-sensitive tail for catalog-backed titles."""
         defaults = {
             "wholesale_faq": {
-                HookType.DATA: "MOQ, Lead Time, Cost Signals, and Buyer Benchmarks",
+                HookType.DATA: "MOQ, Lead Time, and Buyer Checks",
                 HookType.PROBLEM: "MOQ, Lead Time, and Supplier Mistakes to Avoid",
                 HookType.HOW_TO: "Samples, MOQ, and Ordering Steps",
-                HookType.QUESTION: "Supplier Questions, MOQ, and Lead Time Checks",
+                HookType.QUESTION: "Supplier Checks, MOQ, and Lead Time",
                 HookType.STORY: "Buyer Lessons, MOQ, and Ordering Risks",
-                HookType.CONTROVERSY: "Common Supplier Claims, MOQ, and the Real Trade-Offs",
+                HookType.CONTROVERSY: "Supplier Claims, MOQ, and Real Tradeoffs",
             },
             "product_selection": {
-                HookType.DATA: "Material, Capacity, Closure Fit, and Buyer Benchmarks",
+                HookType.DATA: "Material, Capacity, and Closure Fit",
                 HookType.PROBLEM: "Selection Mistakes, Fit Risks, and Better Options",
                 HookType.HOW_TO: "Material, Capacity, and Closure Selection",
                 HookType.QUESTION: "Which Specs Fit, and Which Ones Fail?",
                 HookType.STORY: "Buyer Lessons, Fit Risks, and Selection Criteria",
-                HookType.CONTROVERSY: "Common Assumptions, Fit Risks, and Better Criteria",
+                HookType.CONTROVERSY: "Assumptions, Fit Risks, and Better Criteria",
             },
             "spec_comparison": {
-                HookType.DATA: "Specs, Performance Data, and Buyer Trade-Offs",
-                HookType.PROBLEM: "Spec Risks, Trade-Offs, and Selection Mistakes",
+                HookType.DATA: "Specs, Performance, and Buyer Tradeoffs",
+                HookType.PROBLEM: "Spec Risks, Tradeoffs, and Selection Mistakes",
                 HookType.HOW_TO: "Spec Comparison and Selection Criteria",
                 HookType.QUESTION: "Which Spec Wins for Performance, Cost, and Fit?",
                 HookType.STORY: "Comparison Lessons, Fit Risks, and Buyer Takeaways",
-                HookType.CONTROVERSY: "Common Spec Assumptions and the Real Trade-Offs",
+                HookType.CONTROVERSY: "Spec Assumptions and Real Tradeoffs",
             },
             "category_support": {
-                HookType.DATA: "Product Types, Material Options, and Buyer Benchmarks",
+                HookType.DATA: "Product Types, Material Options, and Buyer Checks",
                 HookType.PROBLEM: "Selection Mistakes, Category Gaps, and Better Options",
                 HookType.HOW_TO: "Product Types, Material Options, and Buyer Checklist",
                 HookType.QUESTION: "Which Options Fit Your Product and Budget?",
                 HookType.STORY: "Buyer Lessons, Shortlisting Tips, and Better Options",
-                HookType.CONTROVERSY: "Common Category Assumptions and Better Buying Criteria",
+                HookType.CONTROVERSY: "Category Assumptions and Better Buying Criteria",
             },
         }
 
@@ -327,11 +444,11 @@ class HookOptimizer:
         fallback = buyer_angle or spec_terms or "Buyer Checklist and Selection Criteria"
 
         if hook_type == HookType.DATA and buyer_angle:
-            return f"{buyer_angle} and Buyer Benchmarks"
+            return f"{buyer_angle} and Buyer Checks"
         if hook_type == HookType.PROBLEM and buyer_angle:
             return f"{buyer_angle} and Common Buying Mistakes"
         if hook_type == HookType.QUESTION and buyer_angle:
-            return f"{buyer_angle} and the Questions Buyers Should Ask"
+            return f"{buyer_angle} and Buyer Questions"
         if hook_type == HookType.HOW_TO and buyer_angle:
             return buyer_angle
 
@@ -475,7 +592,7 @@ class HookOptimizer:
     ) -> str:
         """Generate a fallback title if template fails"""
         keyword_title = self.intent_analyzer.generate_intent_based_title(intent_signal) if intent_signal else topic.title
-        data_fallback = f"{self._keyword_title(topic.title)}: Cost, Performance Data, and Buyer Benchmarks"
+        data_fallback = f"{self._keyword_title(topic.title)}: Cost, Performance, and Buyer Checks"
         if hook_type == HookType.DATA and research and research.statistics:
             stat = research.statistics[0]
             stat_value = stat.get("value")
