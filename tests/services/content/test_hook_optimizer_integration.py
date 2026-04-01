@@ -136,3 +136,41 @@ class TestHookOptimizerIntegration:
         assert best.title.lower().count("30ml") <= 1
         assert "moq" in best.title.lower()
         assert "lead time" in best.title.lower()
+
+    def test_catalog_title_compaction_preserves_hook_specific_tails(self):
+        """Long commercial titles should not collapse different hooks into the same truncated string."""
+        optimizer = HookOptimizer()
+
+        topic = ContentTopic(
+            title="30ml PET 30ml 60ml 100ml white black pump white lid plastic foam bottle empty shampoo container wholesale",
+            angle="supplier comparison",
+            hook_type=HookType.DATA,
+            industry="packaging",
+            target_audience="b2b buyers",
+            business_intent=0.9,
+            trend_score=0.6,
+            competition_score=0.4,
+            differentiation_score=0.8,
+            brand_alignment_score=0.8,
+            value_score=0.82,
+        )
+
+        titles = optimizer.generate_optimized_titles_sync(
+            topic,
+            count=5,
+            catalog_context={
+                "page_type": "wholesale_faq",
+                "decision_questions": [
+                    "What MOQ and lead time should buyers compare?",
+                    "Which supplier questions should buyers ask before sampling?",
+                ],
+            },
+        )
+
+        rendered_titles = [title.title for title in titles]
+
+        assert len(set(rendered_titles)) >= 3
+        assert all(len(title) <= 68 for title in rendered_titles)
+        assert all(not title.lower().endswith((" and", " or", " for", " to", " with")) for title in rendered_titles)
+        assert any("buyer questions" in title.lower() for title in rendered_titles)
+        assert any("buying risks" in title.lower() or "supplier risks" in title.lower() for title in rendered_titles)

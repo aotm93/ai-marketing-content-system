@@ -25,6 +25,7 @@ class HookOptimizer:
     MIN_ACCEPTABLE_MATCH = 0.45
     MAX_SEO_TITLE_LENGTH = 68
     MAX_SUBJECT_WORDS = 8
+    MIN_SUBJECT_LENGTH = 20
     GENERIC_PATTERNS = (
         "data-driven insights",
         "what you need to know",
@@ -239,13 +240,14 @@ class HookOptimizer:
             subject, tail = cleaned.split(":", 1)
             subject = self._compact_subject(subject, keyword)
             tail = self._shorten_tail(tail)
-            rebuilt = f"{subject}: {tail}" if tail else subject
+            rebuilt = self._fit_colon_title(subject, tail, keyword)
         else:
             rebuilt = self._compact_subject(cleaned, keyword)
 
+        rebuilt = self._strip_trailing_connectors(rebuilt)
         if len(rebuilt) > self.MAX_SEO_TITLE_LENGTH:
             rebuilt = self._truncate_title(rebuilt, self.MAX_SEO_TITLE_LENGTH)
-        return rebuilt
+        return self._strip_trailing_connectors(rebuilt)
 
     def _remove_repeated_tokens(self, text: str) -> str:
         """Remove repeated words like '30ml PET 30ml ...' while preserving useful connectors."""
@@ -298,7 +300,62 @@ class HookOptimizer:
         compact_subject = " ".join(compact_tokens) if compact_tokens else subject
         return self._keyword_title(compact_subject).strip()
 
-    def _shorten_tail(self, tail: str) -> str:
+    def _fit_colon_title(self, subject: str, tail: str, keyword: str) -> str:
+        """Keep the differentiating tail intact by shrinking the subject first."""
+        subject = self._strip_trailing_connectors(subject)
+        tail = self._strip_trailing_connectors(tail)
+        if not tail:
+            return subject
+
+        rebuilt = f"{subject}: {tail}"
+        if len(rebuilt) <= self.MAX_SEO_TITLE_LENGTH:
+            return rebuilt
+
+        subject_budget = max(self.MIN_SUBJECT_LENGTH, self.MAX_SEO_TITLE_LENGTH - len(tail) - 2)
+        subject = self._compact_subject_to_budget(subject, keyword, subject_budget)
+        rebuilt = f"{subject}: {tail}"
+        if len(rebuilt) <= self.MAX_SEO_TITLE_LENGTH:
+            return rebuilt
+
+        tail_budget = max(18, self.MAX_SEO_TITLE_LENGTH - len(subject) - 2)
+        tail = self._shorten_tail(tail, max_length=tail_budget)
+        rebuilt = f"{subject}: {tail}" if tail else subject
+
+        if len(rebuilt) > self.MAX_SEO_TITLE_LENGTH:
+            rebuilt = self._truncate_title(rebuilt, self.MAX_SEO_TITLE_LENGTH)
+        return rebuilt
+
+    def _compact_subject_to_budget(self, subject: str, keyword: str, max_length: int) -> str:
+        """Shrink long product subjects before sacrificing the title tail."""
+        if len(subject) <= max_length:
+            return subject
+
+        source = keyword or subject
+        tokens = []
+        for raw_token in source.split():
+            normalized = raw_token.lower().strip(",.;:()[]{}")
+            if not normalized:
+                continue
+            if normalized in {"white", "black", "clear", "empty", "container", "containers"}:
+                continue
+            if normalized not in {item.lower().strip(",.;:()[]{}") for item in tokens}:
+                tokens.append(raw_token)
+
+        compact_tokens = []
+        for token in tokens:
+            candidate = self._keyword_title(" ".join(compact_tokens + [token])).strip()
+            if compact_tokens and len(candidate) > max_length:
+                break
+            compact_tokens.append(token)
+
+        if compact_tokens:
+            subject = self._keyword_title(" ".join(compact_tokens)).strip()
+
+        if len(subject) > max_length:
+            subject = self._truncate_title(subject, max_length)
+        return subject
+
+    def _shorten_tail(self, tail: str, max_length: int = 34) -> str:
         """Compress long tails so titles stay readable in SERP snippets."""
         shortcuts = {
             "Buyer Benchmarks": "Buyer Checks",
@@ -307,18 +364,35 @@ class HookOptimizer:
             "Performance Data": "Performance",
             "The Questions Buyers Should Ask": "Buyer Questions",
             "Common Buying Mistakes": "Buying Mistakes",
+            "Supplier Mistakes To Avoid": "Supplier Risks",
+            "Supplier Mistakes to Avoid": "Supplier Risks",
             "Trade-Offs": "Tradeoffs",
         }
         tail_text = self._remove_repeated_tokens(tail.strip(" ,-"))
         for source, target in shortcuts.items():
             tail_text = tail_text.replace(source, target)
 
+        tail_lower = tail_text.lower()
+        if "moq" in tail_lower and "lead time" in tail_lower:
+            if "question" in tail_lower:
+                tail_text = "MOQ, Lead Time, Buyer Questions"
+            elif "risk" in tail_lower or "mistake" in tail_lower:
+                tail_text = "MOQ, Lead Time, Supplier Risks"
+            elif "lesson" in tail_lower:
+                tail_text = "MOQ, Lead Time, Buyer Lessons"
+            elif "ordering" in tail_lower or "sample" in tail_lower or "step" in tail_lower:
+                tail_text = "MOQ, Lead Time, Ordering Steps"
+            elif "claim" in tail_lower:
+                tail_text = "MOQ, Lead Time, Supplier Claims"
+            else:
+                tail_text = "MOQ, Lead Time, Buyer Checks"
+
         segments = [segment.strip() for segment in tail_text.split(",") if segment.strip()]
         if len(segments) > 3:
             segments = segments[:3]
         compact = ", ".join(segments)
 
-        if "buyer checks" in compact.lower() and len(compact) > 34:
+        if "buyer checks" in compact.lower() and len(compact) > max_length:
             essentials = []
             if "moq" in compact.lower():
                 essentials.append("MOQ")
@@ -327,16 +401,27 @@ class HookOptimizer:
             essentials.append("Buyer Checks")
             compact = ", ".join(essentials)
 
-        if len(compact) > 34:
-            compact = self._truncate_title(compact, 34)
-        return compact
+        if len(compact) > max_length:
+            compact = self._truncate_title(compact, max_length)
+        return self._strip_trailing_connectors(compact)
 
     def _truncate_title(self, title: str, max_length: int) -> str:
         """Trim title at word boundaries and avoid punctuation tails."""
         if len(title) <= max_length:
-            return title
+            return self._strip_trailing_connectors(title)
         trimmed = title[:max_length].rsplit(" ", 1)[0].strip(",;:- ")
-        return trimmed or title[:max_length].strip(",;:- ")
+        trimmed = trimmed or title[:max_length].strip(",;:- ")
+        return self._strip_trailing_connectors(trimmed)
+
+    def _strip_trailing_connectors(self, text: str) -> str:
+        """Remove dangling trailing joiners left behind by aggressive shortening."""
+        cleaned = (text or "").strip(" ,;:-")
+        while cleaned:
+            updated = re.sub(r"(?:\s+(?:and|or|for|to|with|vs))$", "", cleaned, flags=re.IGNORECASE).strip(" ,;:-")
+            if updated == cleaned:
+                break
+            cleaned = updated
+        return cleaned
 
     def _generate_catalog_anchored_title(
         self,
@@ -446,11 +531,15 @@ class HookOptimizer:
         if hook_type == HookType.DATA and buyer_angle:
             return f"{buyer_angle} and Buyer Checks"
         if hook_type == HookType.PROBLEM and buyer_angle:
-            return f"{buyer_angle} and Common Buying Mistakes"
+            return f"{buyer_angle} and Supplier Risks"
         if hook_type == HookType.QUESTION and buyer_angle:
             return f"{buyer_angle} and Buyer Questions"
         if hook_type == HookType.HOW_TO and buyer_angle:
-            return buyer_angle
+            return f"{buyer_angle} and Ordering Steps"
+        if hook_type == HookType.STORY and buyer_angle:
+            return f"{buyer_angle} and Buyer Lessons"
+        if hook_type == HookType.CONTROVERSY and buyer_angle:
+            return f"{buyer_angle} and Supplier Claims"
 
         return page_defaults.get(hook_type, fallback)
 

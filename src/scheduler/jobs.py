@@ -694,6 +694,34 @@ def _select_with_rotation(
     return selected
 
 
+def _content_candidate_cluster_key(candidate: Any) -> str:
+    """Group near-duplicate content candidates by route target before rotation."""
+    page_type = getattr(candidate, "page_type", "") or "category_support"
+    route_target = (
+        getattr(candidate, "route_target_url", None)
+        or getattr(candidate, "route_target_name", None)
+        or getattr(candidate, "primary_taxonomy_url", None)
+        or getattr(candidate, "primary_taxonomy_name", None)
+        or getattr(candidate, "semantic_group", None)
+        or getattr(candidate, "category", None)
+        or getattr(candidate, "keyword", "")
+    )
+    return f"{page_type}|{route_target}"
+
+
+def _collapse_content_candidate_clusters(candidates: List[Any]) -> List[Any]:
+    """Keep only the best candidate in each topic cluster so selection stays diverse."""
+    collapsed = []
+    seen = set()
+    for candidate in candidates:
+        cluster_key = _normalize_rotation_value(_content_candidate_cluster_key(candidate))
+        if cluster_key in seen:
+            continue
+        seen.add(cluster_key)
+        collapsed.append(candidate)
+    return collapsed
+
+
 def _select_best_content_candidate(candidates: list, db=None):
     """Choose the content-aware keyword that best combines routing and commercial value."""
     if not candidates:
@@ -709,14 +737,15 @@ def _select_best_content_candidate(candidates: list, db=None):
         ),
         reverse=True,
     )
+    ranked = _collapse_content_candidate_clusters(ranked)
     if not db:
         return ranked[0]
 
     return _select_with_rotation(
         candidates=ranked,
-        item_key_getter=lambda candidate: getattr(candidate, "keyword", ""),
+        item_key_getter=_content_candidate_cluster_key,
         db=db,
-        history_key="autopilot_recent_content_candidates",
+        history_key="autopilot_recent_content_candidate_clusters",
         top_window=6,
         recent_window=8,
     ) or ranked[0]
