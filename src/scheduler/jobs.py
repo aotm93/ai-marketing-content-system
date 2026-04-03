@@ -518,6 +518,16 @@ def _ensure_catalog_outline(seo_context) -> None:
         logger.debug(f"Failed to backfill catalog outline: {exc}")
 
 
+async def _run_content_planner(seo_context, ai_provider) -> None:
+    """Classify content type and generate tailored section outline. Non-fatal on failure."""
+    try:
+        from src.services.content.content_planner import ContentPlannerService
+        planner = ContentPlannerService(ai_provider)
+        await planner.plan(seo_context)
+    except Exception as exc:
+        logger.warning(f"ContentPlanner failed, using fallback outline: {exc}")
+
+
 def _get_primary_taxonomy_context(seo_context) -> Dict[str, Optional[str]]:
     """Resolve the main landing page the article should route buyers toward."""
     if not seo_context:
@@ -1571,7 +1581,7 @@ async def content_generation_job(data: Dict[str, Any]) -> Dict[str, Any]:
                 # Fetch related terms for LSI
                 related = await kw_client.get_keyword_suggestions(target_keyword, limit=5)
                 semantic_keywords = [r.keyword for r in related]
-            except:
+            except Exception:
                 pass
         
         # Update SEOContext with semantic keywords
@@ -1655,6 +1665,7 @@ async def content_generation_job(data: Dict[str, Any]) -> Dict[str, Any]:
             logger.info(f"Selected title: {seo_context.selected_title}")
             logger.info(f"Hook type: {seo_context.title_hook_type.value if seo_context.title_hook_type else 'N/A'}")
             _ensure_catalog_outline(seo_context)
+            await _run_content_planner(seo_context, ai_provider)   # NEW: classify + outline (non-fatal)
             
             # Create task from SEOContext
             creator_task = seo_context.to_content_creator_task()
@@ -1858,7 +1869,7 @@ Output ONLY the meta description text (no JSON, no quotes).
                 import json
                 clean_json = meta_json_str.replace("```json", "").replace("```", "").strip()
                 meta_data = json.loads(clean_json)
-            except:
+            except (json.JSONDecodeError, KeyError, ValueError):
                 meta_data = {"title": f"{target_keyword} Guide", "meta_description": "Read more...", "excerpt": ""}
 
         result["steps"].append({ 
@@ -2072,7 +2083,7 @@ async def seo_optimization_job(data: Dict[str, Any]) -> Dict[str, Any]:
         try:
             clean_json = seo_json_str.replace("```json", "").replace("```", "").strip()
             optimized_seo = json.loads(clean_json)
-        except:
+        except (json.JSONDecodeError, KeyError):
             logger.warning("Failed to parse AI SEO response, using fallback")
             optimized_seo = {
                 "seo_title": current_title,
@@ -2435,7 +2446,7 @@ async def internal_linking_job(data: Dict[str, Any]) -> Dict[str, Any]:
                 try:
                     clean_json = link_json_str.replace("```json", "").replace("```", "").strip()
                     links_to_add = json.loads(clean_json)
-                except:
+                except (json.JSONDecodeError, KeyError, TypeError):
                     logger.warning("Failed to parse AI linking response")
                     links_to_add = []
                 
