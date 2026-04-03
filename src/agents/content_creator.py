@@ -84,6 +84,8 @@ class ContentCreatorAgent(BaseAgent):
         commercial_facts = task.get("commercial_facts", [])
         supporting_tags = task.get("supporting_tags", [])
         page_type = task.get("page_type", seo_context.get("page_type") if seo_context else "category_support")
+        article_content_type = task.get("article_content_type", "general")
+        planned_outline = task.get("planned_outline", [])
         
         has_seo_context = bool(seo_context) or bool(title_must_use != keyword)
         
@@ -110,7 +112,9 @@ class ContentCreatorAgent(BaseAgent):
             commercial_facts=commercial_facts,
             supporting_tags=supporting_tags,
             semantic_keywords=semantic_keywords,
-            internal_links=internal_links
+            internal_links=internal_links,
+            article_content_type=article_content_type,
+            planned_outline=planned_outline,
         )
 
         # Use higher token limit for synchronized content
@@ -163,7 +167,9 @@ class ContentCreatorAgent(BaseAgent):
         commercial_facts: List[str],
         supporting_tags: List[str],
         semantic_keywords: List[str],
-        internal_links: List[dict]
+        internal_links: List[dict],
+        article_content_type: Optional[str] = None,    # NEW: content type from ContentPlannerService
+        planned_outline: Optional[list] = None,         # NEW: type-specific section outline
     ) -> str:
         """
         Build synchronized prompt ensuring title-content alignment.
@@ -211,6 +217,10 @@ class ContentCreatorAgent(BaseAgent):
 ## RESEARCH DATA
 """
 
+        # Inject content type guidance (when ContentPlannerService ran successfully)
+        content_type_guidance = self._get_content_type_guidance(article_content_type)
+        if content_type_guidance:
+            prompt += content_type_guidance
         prompt += f"""
 
 ## PAGE TYPE
@@ -335,15 +345,25 @@ Use these as concrete buying or sourcing anchors instead of generic filler:
             for fact in commercial_facts[:8]:
                 prompt += f"- {fact}\n"
         
-        # Add outline structure
-        if outline:
-            prompt += f"""
-
-## ARTICLE STRUCTURE (Follow Closely)
-"""
+        # Use planned_outline (from ContentPlannerService) when available; fall back to ContentOutline
+        if planned_outline:
+            prompt += "\n## ARTICLE STRUCTURE (Follow Closely)\n"
+            prompt += "**Sections** (type-specific — follow this order):\n"
+            for i, section in enumerate(planned_outline, 1):
+                section_title = section.get("title", f"Section {i}")
+                section_type = section.get("section_type", "general")
+                key_points = section.get("key_points", [])
+                writing_notes = section.get("writing_notes", "")
+                prompt += f"\n{i}. **{section_title}** ({section_type})\n"
+                if writing_notes:
+                    prompt += f"   Writer note: {writing_notes}\n"
+                for point in key_points[:3]:
+                    prompt += f"   - {point}\n"
+        elif outline:
+            # Fallback: use ContentOutline from ContentIntelligence (existing logic preserved)
+            prompt += "\n## ARTICLE STRUCTURE (Follow Closely)\n"
             if outline.get('hook'):
                 prompt += f"**Opening Hook**: {outline['hook']}\n\n"
-            
             sections = outline.get('sections', [])
             if sections:
                 prompt += "**Sections**:\n"
@@ -351,15 +371,13 @@ Use these as concrete buying or sourcing anchors instead of generic filler:
                     section_title = section.get('title', f'Section {i}')
                     content_type = section.get('content_type', 'general')
                     key_points = section.get('key_points', [])
-                    
                     prompt += f"\n{i}. **{section_title}** ({content_type})\n"
                     if key_points:
                         for point in key_points[:3]:
                             prompt += f"   - {point}\n"
-            
             if outline.get('conclusion_type'):
                 prompt += f"\n**Conclusion Type**: {outline['conclusion_type'].upper()}\n"
-        
+
         # Add semantic keywords
         if semantic_keywords:
             prompt += f"""
@@ -492,6 +510,26 @@ Write the complete article now:
         digest = hashlib.md5(key.encode("utf-8")).hexdigest()
         index = int(digest[:8], 16) % len(self.EDITORIAL_BLUEPRINTS)
         return self.EDITORIAL_BLUEPRINTS[index]
+
+    def _get_content_type_guidance(self, article_content_type: Optional[str]) -> str:
+        """Build content-type-specific opening/closing guidance block for the prompt."""
+        if not article_content_type or article_content_type == "general":
+            return ""
+        from src.services.content.content_type_templates import CONTENT_TYPE_TEMPLATES
+        from src.models.seo_context import ArticleContentType
+        try:
+            ct = ArticleContentType(article_content_type)
+        except ValueError:
+            return ""
+        template = CONTENT_TYPE_TEMPLATES.get(ct)
+        if not template:
+            return ""
+        return (
+            f"\n## CONTENT TYPE: {ct.value.upper()}\n"
+            f"**Opening approach**: {template.opening_instruction}\n"
+            f"**Closing approach**: {template.closing_instruction}\n"
+            f"Follow the structural pattern for {ct.value} content — do not default to a generic blog post skeleton.\n"
+        )
 
     def _format_products_for_prompt(self, products: list) -> str:
         """Format product examples for prompt readability."""
