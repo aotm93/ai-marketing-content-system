@@ -53,21 +53,19 @@
 
 ## Traceability
 
-Populated by roadmapper.
-
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| ROBUST-01 | Phase 1 | Pending |
-| CLASS-01 | Phase 1 | Pending |
-| CLASS-02 | Phase 1 | Pending |
-| TMPL-01 | Phase 1 | Pending |
-| TMPL-02 | Phase 1 | Pending |
-| TMPL-03 | Phase 1 | Pending |
-| PIPE-01 | Phase 2 | Pending |
-| PIPE-02 | Phase 2 | Pending |
-| PIPE-03 | Phase 2 | Pending |
-| CLASS-03 | Phase 2 | Pending |
-| ROBUST-02 | Phase 2 | Pending |
+| ROBUST-01 | Phase 1 — Classification & Template Infrastructure | Pending |
+| CLASS-01 | Phase 1 — Classification & Template Infrastructure | Pending |
+| CLASS-02 | Phase 1 — Classification & Template Infrastructure | Pending |
+| TMPL-01 | Phase 1 — Classification & Template Infrastructure | Pending |
+| TMPL-02 | Phase 1 — Classification & Template Infrastructure | Pending |
+| TMPL-03 | Phase 1 — Classification & Template Infrastructure | Pending |
+| PIPE-01 | Phase 2 — Pipeline Integration & Robustness | Pending |
+| PIPE-02 | Phase 2 — Pipeline Integration & Robustness | Pending |
+| PIPE-03 | Phase 2 — Pipeline Integration & Robustness | Pending |
+| CLASS-03 | Phase 2 — Pipeline Integration & Robustness | Pending |
+| ROBUST-02 | Phase 2 — Pipeline Integration & Robustness | Pending |
 
 **Coverage:**
 - v1 requirements: 11 total
