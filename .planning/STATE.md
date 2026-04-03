@@ -12,7 +12,7 @@ See: .planning/PROJECT.md (updated 2026-04-03)
 Phase: 1 of 2 (Classification & Template Infrastructure)
 Plan: 1 of 1 completed (quick task 260403-quq)
 Status: Quick task complete — all 3 tasks executed, 12 tests passing
-Last activity: 2026-04-03 — Content type classification pipeline implemented end-to-end
+Last activity: 2026-04-03 - Completed quick task 260403-quq: 改进文章内容生成逻辑，根据标题规划有价值的多样化内容结构
 
 Progress: [██████████] 100% (quick task scope)
 
@@ -52,6 +52,12 @@ Recent decisions affecting current work:
 ### Pending Todos
 
 None yet.
+
+### Quick Tasks Completed
+
+| # | Description | Date | Commit | Directory |
+|---|-------------|------|--------|-----------|
+| 260403-quq | 改进文章内容生成逻辑，根据标题规划有价值的多样化内容结构 | 2026-04-03 | 493fe55 | [260403-quq-content-type-planning](./quick/260403-quq-content-type-planning/) |
 
 ### Blockers/Concerns
 
