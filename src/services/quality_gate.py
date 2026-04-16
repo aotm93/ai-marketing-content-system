@@ -208,6 +208,10 @@ class EnhancedQualityGate:
         components: Optional[List[str]] = None,
         page_type: Optional[str] = None,
         catalog_context: Optional[Dict[str, Any]] = None,
+        meta_title: Optional[str] = None,
+        meta_description: Optional[str] = None,
+        content_lane: Optional[str] = None,
+        search_stage: Optional[str] = None,
     ) -> QualityDiagnostic:
         """
         Run comprehensive quality diagnostic
@@ -286,6 +290,22 @@ class EnhancedQualityGate:
             )
             issues.extend(catalog_issues)
 
+        # 8. Lane-aware publish readiness analysis for meta / CTA fit
+        lane_score = None
+        resolved_lane = content_lane or (catalog_context or {}).get("content_lane")
+        resolved_stage = search_stage or (catalog_context or {}).get("search_stage")
+        if resolved_lane or meta_title or meta_description:
+            lane_score, lane_issues = self._analyze_lane_alignment(
+                content=content,
+                text_content=text_content,
+                target_keyword=target_keyword or "",
+                meta_title=meta_title,
+                meta_description=meta_description,
+                content_lane=resolved_lane or "procurement_conversion",
+                search_stage=resolved_stage,
+            )
+            issues.extend(lane_issues)
+
         # Calculate overall score
         overall_score = sum(
             scores[k] * self.SCORE_WEIGHTS[k] 
@@ -293,6 +313,11 @@ class EnhancedQualityGate:
         )
         if catalog_score is not None:
             overall_score = (overall_score * 0.85) + (catalog_score * 0.15)
+        if lane_score is not None:
+            if catalog_score is not None:
+                overall_score = (overall_score * 0.90) + (lane_score * 0.10)
+            else:
+                overall_score = (overall_score * 0.88) + (lane_score * 0.12)
         
         # Determine grade
         grade = self._calculate_grade(overall_score)
@@ -320,6 +345,9 @@ class EnhancedQualityGate:
             "link_count": len(re.findall(r'<a\s', content, re.IGNORECASE)),
             "component_scores": scores,
             "catalog_alignment_score": round(catalog_score, 1) if catalog_score is not None else None,
+            "lane_alignment_score": round(lane_score, 1) if lane_score is not None else None,
+            "content_lane": resolved_lane,
+            "search_stage": resolved_stage,
         }
         
         return QualityDiagnostic(
@@ -1182,6 +1210,152 @@ class EnhancedQualityGate:
             ))
 
         return max(0, score), issues
+
+    def _analyze_lane_alignment(
+        self,
+        content: str,
+        text_content: str,
+        target_keyword: str,
+        meta_title: Optional[str],
+        meta_description: Optional[str],
+        content_lane: str,
+        search_stage: Optional[str],
+    ) -> Tuple[float, List[QualityIssue]]:
+        """Check whether meta and CTA behavior match the selected content lane."""
+        issues: List[QualityIssue] = []
+        score = 100
+
+        content_lower = content.lower()
+        text_lower = text_content.lower()
+        meta_title_lower = (meta_title or "").lower()
+        meta_description_lower = (meta_description or "").lower()
+        keyword_tokens = [token for token in re.findall(r"[a-zA-Z0-9]{3,}", (target_keyword or "").lower())]
+
+        if keyword_tokens and meta_title_lower:
+            matched = sum(1 for token in keyword_tokens if token in meta_title_lower)
+            if matched == 0:
+                score -= 12
+                issues.append(QualityIssue(
+                    issue_id="LANE-001",
+                    category=IssueCategory.SEO,
+                    severity=IssueSeverity.HIGH,
+                    title="Meta title drifts away from the target query",
+                    description="The meta title does not preserve enough of the target query tokens.",
+                    location="Meta title",
+                    current_value=meta_title or "",
+                    expected_value="Meta title should retain meaningful target query terms",
+                    fix_recommendation="Keep the title lane-aware, but preserve the core product/search tokens in the meta title.",
+                    auto_fixable=False,
+                    estimated_fix_time="5 min"
+                ))
+
+        has_buyer_next_step = 'class="buyer-next-step"' in content_lower
+        has_internal_link = "<a " in content_lower
+        cta_terms = ["browse", "compare", "shortlist", "request", "quote", "sample", "review"]
+        cta_term_hits = sum(1 for term in cta_terms if term in text_lower)
+
+        if content_lane == "traffic_entry":
+            traffic_meta_hits = self._count_traffic_terms(meta_description_lower)
+            procurement_meta_hits = self._count_procurement_terms(meta_description_lower)
+
+            if meta_description_lower and traffic_meta_hits == 0:
+                score -= 18
+                issues.append(QualityIssue(
+                    issue_id="LANE-002",
+                    category=IssueCategory.SEO,
+                    severity=IssueSeverity.HIGH,
+                    title="Traffic-entry meta description lacks search-entry framing",
+                    description="The meta description does not emphasize scenario fit, comparison, application, or selection signals.",
+                    location="Meta description",
+                    current_value=meta_description or "",
+                    expected_value="Meta description should signal search-entry value such as fit, trade-offs, material choice, or application context",
+                    fix_recommendation="Rewrite the meta description to emphasize scenario fit, trade-offs, material/application context, or comparison value before the user reaches procurement mode.",
+                    auto_fixable=False,
+                    estimated_fix_time="5 min"
+                ))
+            if meta_description_lower and procurement_meta_hits >= 2 and traffic_meta_hits == 0:
+                score -= 12
+                issues.append(QualityIssue(
+                    issue_id="LANE-003",
+                    category=IssueCategory.SEO,
+                    severity=IssueSeverity.MEDIUM,
+                    title="Traffic-entry meta description is overly procurement-led",
+                    description="The page is routed as traffic-entry, but the meta description reads like a procurement CTA.",
+                    location="Meta description",
+                    current_value=meta_description or "",
+                    expected_value="Meta description should stay in search-entry mode before pushing procurement actions",
+                    fix_recommendation="Reduce quote/sample/MOQ-first language and shift the meta description toward fit, comparison, or selection guidance.",
+                    auto_fixable=False,
+                    estimated_fix_time="5 min"
+                ))
+            if has_buyer_next_step:
+                score -= 15
+                issues.append(QualityIssue(
+                    issue_id="LANE-004",
+                    category=IssueCategory.STRUCTURE,
+                    severity=IssueSeverity.HIGH,
+                    title="Traffic-entry page uses procurement CTA block",
+                    description="A traffic-entry article should not end with the buyer-next-step procurement module.",
+                    location="CTA section",
+                    current_value="buyer-next-step block detected",
+                    expected_value="CTA should bridge readers into browsing/comparison without procurement hard sell",
+                    fix_recommendation="Replace the procurement CTA block with a softer bridge CTA focused on browsing, comparing, or shortlisting the next step.",
+                    auto_fixable=False,
+                    estimated_fix_time="5 min"
+                ))
+            if not has_internal_link or cta_term_hits < 2:
+                score -= 10
+                issues.append(QualityIssue(
+                    issue_id="LANE-005",
+                    category=IssueCategory.QUALITY,
+                    severity=IssueSeverity.MEDIUM,
+                    title="Traffic-entry page lacks a clear bridge CTA",
+                    description="The article does not clearly guide the reader toward the next browse/compare step.",
+                    location="CTA or closing section",
+                    current_value="Weak browse/compare CTA",
+                    expected_value="At least one natural internal route plus clear compare/browse/shortlist guidance",
+                    fix_recommendation="Add a closing CTA that invites the reader to browse, compare, or shortlist the next relevant category/tag/product path without forcing a quote request.",
+                    auto_fixable=False,
+                    estimated_fix_time="10 min"
+                ))
+            if search_stage in {"awareness", "consideration"} and traffic_meta_hits == 0:
+                score -= 8
+        else:
+            procurement_meta_hits = self._count_procurement_terms(meta_description_lower)
+            if meta_description_lower and procurement_meta_hits == 0:
+                score -= 18
+                issues.append(QualityIssue(
+                    issue_id="LANE-006",
+                    category=IssueCategory.SEO,
+                    severity=IssueSeverity.HIGH,
+                    title="Procurement-conversion meta description lacks buying intent signals",
+                    description="A procurement page should communicate supplier, MOQ, lead time, samples, QC, or quote-oriented value.",
+                    location="Meta description",
+                    current_value=meta_description or "",
+                    expected_value="Meta description should show concrete commercial decision value",
+                    fix_recommendation="Rewrite the meta description to emphasize commercial decision signals such as supplier fit, MOQ, lead time, samples, QC, or quote comparison.",
+                    auto_fixable=False,
+                    estimated_fix_time="5 min"
+                ))
+            if not has_buyer_next_step and (not has_internal_link or cta_term_hits < 2):
+                score -= 12
+                issues.append(QualityIssue(
+                    issue_id="LANE-007",
+                    category=IssueCategory.STRUCTURE,
+                    severity=IssueSeverity.HIGH,
+                    title="Procurement-conversion page lacks a conversion CTA",
+                    description="The article should end with a stronger shortlist / supplier / sample / quote next step.",
+                    location="CTA or closing section",
+                    current_value="No procurement CTA block or equivalent decision CTA",
+                    expected_value="A clear shortlist / supplier-evaluation next step",
+                    fix_recommendation="Add a buyer-oriented CTA that pushes the reader toward shortlist validation, supplier review, sample approval, or quote comparison.",
+                    auto_fixable=False,
+                    estimated_fix_time="10 min"
+                ))
+            if search_stage == "decision" and procurement_meta_hits == 0:
+                score -= 8
+
+        return max(0, score), issues
     
     # ==================== Utility Methods ====================
     
@@ -1199,6 +1373,24 @@ class EnhancedQualityGate:
             "sgs", "fda", "iso", "printing", "packaging", "shipping", "quote"
         ]
         return sum(1 for signal in signals if signal in text_lower)
+
+    def _count_procurement_terms(self, text_lower: str) -> int:
+        """Count procurement / conversion-oriented terms in metadata or content."""
+        terms = [
+            "supplier", "wholesale", "moq", "lead time", "sample", "samples",
+            "quote", "quotes", "audit", "qc", "quality control",
+            "customization", "certification", "certifications",
+        ]
+        return sum(1 for term in terms if term in text_lower)
+
+    def _count_traffic_terms(self, text_lower: str) -> int:
+        """Count search-entry / research-oriented terms in metadata or content."""
+        terms = [
+            "compare", "comparison", "vs", "versus", "tradeoff", "tradeoffs",
+            "fit", "application", "material", "materials", "selection",
+            "use case", "scenario", "formula", "compatibility",
+        ]
+        return sum(1 for term in terms if term in text_lower)
     
     def _calculate_grade(self, score: float) -> str:
         """Calculate letter grade from score"""

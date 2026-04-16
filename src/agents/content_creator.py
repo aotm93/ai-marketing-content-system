@@ -83,6 +83,9 @@ class ContentCreatorAgent(BaseAgent):
         decision_questions = task.get("decision_questions", [])
         commercial_facts = task.get("commercial_facts", [])
         supporting_tags = task.get("supporting_tags", [])
+        content_lane = task.get("content_lane", seo_context.get("content_lane") if seo_context else "procurement_conversion")
+        content_lane_confidence = task.get("content_lane_confidence", seo_context.get("content_lane_confidence") if seo_context else None)
+        search_stage = task.get("search_stage", seo_context.get("search_stage") if seo_context else None)
         page_type = task.get("page_type", seo_context.get("page_type") if seo_context else "category_support")
         article_content_type = task.get("article_content_type", "general")
         planned_outline = task.get("planned_outline", [])
@@ -111,6 +114,9 @@ class ContentCreatorAgent(BaseAgent):
             decision_questions=decision_questions,
             commercial_facts=commercial_facts,
             supporting_tags=supporting_tags,
+            content_lane=content_lane,
+            content_lane_confidence=content_lane_confidence,
+            search_stage=search_stage,
             semantic_keywords=semantic_keywords,
             internal_links=internal_links,
             article_content_type=article_content_type,
@@ -166,6 +172,9 @@ class ContentCreatorAgent(BaseAgent):
         decision_questions: List[str],
         commercial_facts: List[str],
         supporting_tags: List[str],
+        content_lane: str,
+        content_lane_confidence: Optional[float],
+        search_stage: Optional[str],
         semantic_keywords: List[str],
         internal_links: List[dict],
         article_content_type: Optional[str] = None,    # NEW: content type from ContentPlannerService
@@ -187,6 +196,7 @@ class ContentCreatorAgent(BaseAgent):
             title_must_use=title_must_use,
             page_type=page_type,
             hook_type=hook_type,
+            content_lane=content_lane,
         )
         
         # Base prompt with mandatory title usage
@@ -213,6 +223,12 @@ class ContentCreatorAgent(BaseAgent):
    - Evidence pattern: {editorial_blueprint['evidence']}
    - Closing pattern: {editorial_blueprint['closing']}
    - Do NOT fall back to one-size-fits-all article sequencing.
+
+5. **CONTENT LANE / SEARCH STAGE**:
+   - Lane: {content_lane}
+   - Search stage: {search_stage or 'unspecified'}
+   - Lane confidence: {content_lane_confidence if content_lane_confidence is not None else 'N/A'}
+   {self._get_content_lane_requirements(content_lane, search_stage)}
 
 ## RESEARCH DATA
 """
@@ -504,12 +520,31 @@ Write the complete article now:
         title_must_use: str,
         page_type: str,
         hook_type: Optional[str],
+        content_lane: str,
     ) -> Dict[str, str]:
         """Select a deterministic blueprint to diversify structure across articles."""
-        key = f"{keyword}|{title_must_use}|{page_type}|{hook_type or 'general'}"
+        key = f"{keyword}|{title_must_use}|{page_type}|{content_lane}|{hook_type or 'general'}"
         digest = hashlib.md5(key.encode("utf-8")).hexdigest()
         index = int(digest[:8], 16) % len(self.EDITORIAL_BLUEPRINTS)
         return self.EDITORIAL_BLUEPRINTS[index]
+
+    def _get_content_lane_requirements(self, content_lane: str, search_stage: Optional[str]) -> str:
+        """Return lane-specific constraints so title role propagates into the article body."""
+        if content_lane == "traffic_entry":
+            return (
+                "- Open from scenario, application fit, comparison, or problem framing\n"
+                "- Make the article feel like a professional search-entry page, not an encyclopedia article\n"
+                "- Explain why the specs or trade-offs matter in a real packaging or sourcing scenario\n"
+                "- Bridge readers toward the correct category/tag/product page only after clarifying fit, risk, or selection logic\n"
+                f"- Treat the reader as a {search_stage or 'mid-funnel'} searcher who needs decision value, not beginner education"
+            )
+        return (
+            "- Open from buyer decision stakes: supplier fit, MOQ/cost drivers, sample/QC steps, or quotation variables\n"
+            "- Make the article read like a procurement-conversion page, not a generic guide\n"
+            "- Include rigorous evaluation framework, inspection checklist, or decision matrix where relevant\n"
+            "- Keep application context and buyer decision perspective visible even when discussing commercial details\n"
+            f"- Treat the reader as a {search_stage or 'decision-stage'} buyer who is validating suppliers and shortlists"
+        )
 
     def _get_content_type_guidance(self, article_content_type: Optional[str]) -> str:
         """Build content-type-specific opening/closing guidance block for the prompt."""

@@ -316,3 +316,40 @@ class TestHookOptimizer:
         assert any("moq" in title.title.lower() for title in titles)
         assert any("lead time" in title.title.lower() for title in titles)
         assert all("30ml pet spray bottle wholesale" in title.title.lower() for title in titles)
+
+    @pytest.mark.asyncio
+    async def test_select_best_title_uses_lane_fit_for_traffic_entry(self, optimizer):
+        topic = ContentTopic(
+            title="glass vs pet dropper bottle for serum",
+            angle="material comparison for serum packaging",
+            hook_type=HookType.DATA,
+            industry="packaging",
+            target_audience="b2b buyers",
+            business_intent=0.7,
+            trend_score=0.6,
+            competition_score=0.45,
+            differentiation_score=0.75,
+            brand_alignment_score=0.78,
+            value_score=0.76,
+        )
+
+        titles = await optimizer.generate_optimized_titles(
+            topic,
+            count=5,
+            catalog_context={
+                "page_type": "spec_comparison",
+                "content_lane": "traffic_entry",
+                "search_stage": "consideration",
+                "target_category_name": "Dropper Bottles",
+            },
+        )
+
+        selected = await optimizer.select_best_title(
+            titles,
+            strategy="balanced",
+            target_keyword=topic.title,
+            content_lane="traffic_entry",
+        )
+
+        selected_lower = selected.title.lower()
+        assert any(term in selected_lower for term in ["tradeoff", "fit", "selection", "comparison"])

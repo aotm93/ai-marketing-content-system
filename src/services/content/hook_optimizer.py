@@ -49,6 +49,16 @@ class HookOptimizer:
         "customization", "material", "capacity", "closure", "qc",
         "certifications", "audit", "checklist"
     ]
+    PROCUREMENT_SIGNALS = {
+        "supplier", "suppliers", "moq", "lead time", "sample", "samples",
+        "audit", "quote", "quotes", "qc", "quality", "quality control",
+        "customization", "certification", "certifications", "shipment", "packaging"
+    }
+    TRAFFIC_SIGNALS = {
+        "vs", "versus", "application", "applications", "material", "materials",
+        "problem", "problems", "risk", "risks", "fit", "selection", "choose",
+        "comparison", "compare", "tradeoff", "tradeoffs", "use case", "use cases"
+    }
     KEY_SUBJECT_TERMS = {
         "bottle", "bottles", "jar", "jars", "container", "containers", "tube", "tubes",
         "spray", "pump", "foamer", "foam", "dropper", "lotion", "supplier", "wholesale",
@@ -358,48 +368,26 @@ class HookOptimizer:
     def _shorten_tail(self, tail: str, max_length: int = 34) -> str:
         """Compress long tails so titles stay readable in SERP snippets."""
         shortcuts = {
-            "Buyer Benchmarks": "Buyer Checks",
-            "Selection Criteria": "Selection Guide",
-            "Supplier Questions": "Supplier Checks",
+            "Supplier Benchmarks": "Supplier Benchmarks",
+            "Selection Criteria": "Selection Signals",
+            "Supplier Questions": "Quote Questions",
             "Performance Data": "Performance",
             "The Questions Buyers Should Ask": "Buyer Questions",
             "Common Buying Mistakes": "Buying Mistakes",
             "Supplier Mistakes To Avoid": "Supplier Risks",
             "Supplier Mistakes to Avoid": "Supplier Risks",
             "Trade-Offs": "Tradeoffs",
+            "Hidden Tradeoffs": "Tradeoffs",
+            "Selection Logic": "Selection Logic",
         }
         tail_text = self._remove_repeated_tokens(tail.strip(" ,-"))
         for source, target in shortcuts.items():
             tail_text = tail_text.replace(source, target)
 
-        tail_lower = tail_text.lower()
-        if "moq" in tail_lower and "lead time" in tail_lower:
-            if "question" in tail_lower:
-                tail_text = "MOQ, Lead Time, Buyer Questions"
-            elif "risk" in tail_lower or "mistake" in tail_lower:
-                tail_text = "MOQ, Lead Time, Supplier Risks"
-            elif "lesson" in tail_lower:
-                tail_text = "MOQ, Lead Time, Buyer Lessons"
-            elif "ordering" in tail_lower or "sample" in tail_lower or "step" in tail_lower:
-                tail_text = "MOQ, Lead Time, Ordering Steps"
-            elif "claim" in tail_lower:
-                tail_text = "MOQ, Lead Time, Supplier Claims"
-            else:
-                tail_text = "MOQ, Lead Time, Buyer Checks"
-
         segments = [segment.strip() for segment in tail_text.split(",") if segment.strip()]
         if len(segments) > 3:
             segments = segments[:3]
         compact = ", ".join(segments)
-
-        if "buyer checks" in compact.lower() and len(compact) > max_length:
-            essentials = []
-            if "moq" in compact.lower():
-                essentials.append("MOQ")
-            if "lead time" in compact.lower():
-                essentials.append("Lead Time")
-            essentials.append("Buyer Checks")
-            compact = ", ".join(essentials)
 
         if len(compact) > max_length:
             compact = self._truncate_title(compact, max_length)
@@ -444,6 +432,8 @@ class HookOptimizer:
         )
         supporting_products = catalog_context.get("supporting_products") or []
         decision_questions = catalog_context.get("decision_questions") or []
+        content_lane = catalog_context.get("content_lane", "procurement_conversion")
+        search_stage = catalog_context.get("search_stage")
 
         subject = self._keyword_title(topic.title)
         category_title = self._keyword_title(primary_target) if primary_target else None
@@ -451,22 +441,33 @@ class HookOptimizer:
         product_name = self._keyword_title(product.get("name", "")) if product.get("name") else None
         spec_terms = self._extract_spec_terms(product, topic.title)
         buyer_angle = self._derive_buyer_angle(decision_questions, page_type)
-        hook_tail = self._catalog_tail_for_hook(hook_type, page_type, buyer_angle, spec_terms)
+        hook_tail = self._catalog_tail_for_hook(
+            hook_type,
+            page_type,
+            buyer_angle,
+            spec_terms,
+            content_lane,
+            search_stage,
+            topic.title,
+        )
 
         if page_type == "wholesale_faq":
             title = f"{subject}: {hook_tail}"
-            return title, "Catalog-backed wholesale FAQ title using supplier decision criteria"
+            rationale = "Lane-aware wholesale title using supplier criteria" if content_lane == "procurement_conversion" else "Lane-aware search-entry title using scenario-driven framing"
+            return title, rationale
 
         if page_type == "product_selection":
             if category_title:
                 title = f"{subject} for {category_title}: {hook_tail}"
             else:
                 title = f"{subject}: {hook_tail}"
-            return title, "Catalog-backed product selection title using category fit and buyer criteria"
+            rationale = "Lane-aware product selection title aligned to scenario fit and buyer criteria"
+            return title, rationale
 
         if page_type == "spec_comparison":
             title = f"{subject}: {hook_tail}"
-            return title, "Catalog-backed comparison title emphasizing specs and trade-offs"
+            rationale = "Lane-aware comparison title emphasizing trade-offs or buying criteria"
+            return title, rationale
 
         if page_type == "category_support":
             focus = hook_tail
@@ -474,11 +475,13 @@ class HookOptimizer:
                 title = f"{category_title}: {focus}"
             else:
                 title = f"{subject}: {focus}"
-            return title, "Catalog-backed category support title aligned to browsing and shortlist intent"
+            rationale = "Lane-aware category support title aligned to browsing or shortlist intent"
+            return title, rationale
 
         if product_name and hook_type in {HookType.DATA, HookType.QUESTION}:
             title = f"{subject}: {hook_tail}"
-            return title, "Catalog-backed commercial title using product example and buyer questions"
+            rationale = "Lane-aware product title using route-specific decision framing"
+            return title, rationale
 
         return None
 
@@ -488,60 +491,152 @@ class HookOptimizer:
         page_type: Optional[str],
         buyer_angle: Optional[str],
         spec_terms: Optional[str],
+        content_lane: str,
+        search_stage: Optional[str],
+        topic_title: str,
     ) -> str:
         """Choose a hook-sensitive tail for catalog-backed titles."""
-        defaults = {
+        procurement_defaults = {
             "wholesale_faq": {
-                HookType.DATA: "MOQ, Lead Time, and Buyer Checks",
-                HookType.PROBLEM: "MOQ, Lead Time, and Supplier Mistakes to Avoid",
-                HookType.HOW_TO: "Samples, MOQ, and Ordering Steps",
-                HookType.QUESTION: "Supplier Checks, MOQ, and Lead Time",
-                HookType.STORY: "Buyer Lessons, MOQ, and Ordering Risks",
-                HookType.CONTROVERSY: "Supplier Claims, MOQ, and Real Tradeoffs",
+                HookType.DATA: "Supplier Benchmarks, MOQ Drivers, and Packaging Specs",
+                HookType.PROBLEM: "Supplier Risks, Sample Delays, and QC Gaps",
+                HookType.HOW_TO: "Supplier Shortlisting, Sampling Steps, and Quote Checks",
+                HookType.QUESTION: "Which Supplier Checks, MOQ Terms, and Lead-Time Risks Matter?",
+                HookType.STORY: "Buyer Lessons, Quote Gaps, and Sampling Risks",
+                HookType.CONTROVERSY: "Low MOQ Claims, Hidden Costs, and Audit Tradeoffs",
             },
             "product_selection": {
-                HookType.DATA: "Material, Capacity, and Closure Fit",
-                HookType.PROBLEM: "Selection Mistakes, Fit Risks, and Better Options",
-                HookType.HOW_TO: "Material, Capacity, and Closure Selection",
-                HookType.QUESTION: "Which Specs Fit, and Which Ones Fail?",
-                HookType.STORY: "Buyer Lessons, Fit Risks, and Selection Criteria",
-                HookType.CONTROVERSY: "Assumptions, Fit Risks, and Better Criteria",
+                HookType.DATA: "Specification Checks, MOQ Drivers, and Supplier Fit",
+                HookType.PROBLEM: "Selection Risks, Spec Mismatch, and QC Gaps",
+                HookType.HOW_TO: "Supplier Evaluation, Sample Steps, and Shortlist Criteria",
+                HookType.QUESTION: "Which Specs, Supplier Terms, and Sampling Rules Matter?",
+                HookType.STORY: "Buyer Lessons, Spec Gaps, and Supplier Tradeoffs",
+                HookType.CONTROVERSY: "Spec Assumptions, Hidden Costs, and Better Criteria",
             },
             "spec_comparison": {
-                HookType.DATA: "Specs, Performance, and Buyer Tradeoffs",
-                HookType.PROBLEM: "Spec Risks, Tradeoffs, and Selection Mistakes",
-                HookType.HOW_TO: "Spec Comparison and Selection Criteria",
-                HookType.QUESTION: "Which Spec Wins for Performance, Cost, and Fit?",
-                HookType.STORY: "Comparison Lessons, Fit Risks, and Buyer Takeaways",
-                HookType.CONTROVERSY: "Spec Assumptions and Real Tradeoffs",
+                HookType.DATA: "Comparison Benchmarks, Supplier Risks, and Buying Thresholds",
+                HookType.PROBLEM: "Spec Risks, Cost Gaps, and Shortlist Mistakes",
+                HookType.HOW_TO: "Comparison Criteria, Sample Checks, and Quote Variables",
+                HookType.QUESTION: "Which Spec Wins for Cost, Lead Time, and Supplier Fit?",
+                HookType.STORY: "Comparison Lessons, QC Risks, and Buyer Takeaways",
+                HookType.CONTROVERSY: "Spec Assumptions, Hidden Costs, and Real Tradeoffs",
             },
             "category_support": {
-                HookType.DATA: "Product Types, Material Options, and Buyer Checks",
-                HookType.PROBLEM: "Selection Mistakes, Category Gaps, and Better Options",
-                HookType.HOW_TO: "Product Types, Material Options, and Buyer Checklist",
-                HookType.QUESTION: "Which Options Fit Your Product and Budget?",
-                HookType.STORY: "Buyer Lessons, Shortlisting Tips, and Better Options",
-                HookType.CONTROVERSY: "Category Assumptions and Better Buying Criteria",
+                HookType.DATA: "Range Benchmarks, Supplier Filters, and Shortlist Criteria",
+                HookType.PROBLEM: "Selection Mistakes, Supplier Gaps, and Better Options",
+                HookType.HOW_TO: "Shortlisting Steps, Supplier Checks, and Sample Planning",
+                HookType.QUESTION: "Which Options Fit Your Product, MOQ, and Supplier Needs?",
+                HookType.STORY: "Buyer Lessons, Shortlisting Tips, and Sampling Risks",
+                HookType.CONTROVERSY: "Category Assumptions, Hidden Costs, and Better Criteria",
+            },
+        }
+        traffic_defaults = {
+            "wholesale_faq": {
+                HookType.DATA: "Use Cases, Packaging Constraints, and Selection Signals",
+                HookType.PROBLEM: "Application Risks, Fit Gaps, and Better Scenarios",
+                HookType.HOW_TO: "Use-Case Fit, Material Choice, and Selection Steps",
+                HookType.QUESTION: "Which Packaging Option Fits Your Formula and Usage?",
+                HookType.STORY: "Scenario Lessons, Fit Gaps, and Better Options",
+                HookType.CONTROVERSY: "Common Assumptions, Fit Risks, and Better Criteria",
+            },
+            "product_selection": {
+                HookType.DATA: "Material Fit, Closure Match, and Use-Case Triggers",
+                HookType.PROBLEM: "Mismatch Risks, Use-Case Gaps, and Better Options",
+                HookType.HOW_TO: "Application Fit, Material Choice, and Selection Logic",
+                HookType.QUESTION: "Which Specs Fit the Formula, Closure, and Usage?",
+                HookType.STORY: "Use-Case Lessons, Fit Risks, and Better Options",
+                HookType.CONTROVERSY: "Selection Assumptions, Fit Risks, and Better Criteria",
+            },
+            "spec_comparison": {
+                HookType.DATA: "Performance Tradeoffs, Application Fit, and Selection Signals",
+                HookType.PROBLEM: "Failure Risks, Fit Gaps, and Comparison Mistakes",
+                HookType.HOW_TO: "Comparison Logic, Material Fit, and Use-Case Selection",
+                HookType.QUESTION: "Which Spec Wins for Stability, Fit, and Formula Needs?",
+                HookType.STORY: "Comparison Lessons, Fit Risks, and Scenario Takeaways",
+                HookType.CONTROVERSY: "Spec Assumptions, Use-Case Gaps, and Better Criteria",
+            },
+            "category_support": {
+                HookType.DATA: "Application Paths, Material Choices, and Fit Signals",
+                HookType.PROBLEM: "Selection Mistakes, Fit Risks, and Better Scenarios",
+                HookType.HOW_TO: "Application Fit, Material Choice, and Product Selection",
+                HookType.QUESTION: "Which Option Fits Your Formula, Package, and Usage?",
+                HookType.STORY: "Scenario Lessons, Shortlisting Signals, and Better Options",
+                HookType.CONTROVERSY: "Category Assumptions, Fit Risks, and Better Criteria",
             },
         }
 
+        if content_lane == "procurement_conversion":
+            return self._procurement_tail_for_hook(
+                hook_type=hook_type,
+                page_type=page_type,
+                buyer_angle=buyer_angle,
+                spec_terms=spec_terms,
+                defaults=procurement_defaults,
+            )
+        return self._traffic_tail_for_hook(
+            hook_type=hook_type,
+            page_type=page_type,
+            spec_terms=spec_terms,
+            defaults=traffic_defaults,
+            search_stage=search_stage,
+            topic_title=topic_title,
+        )
+
+    def _procurement_tail_for_hook(
+        self,
+        hook_type: HookType,
+        page_type: Optional[str],
+        buyer_angle: Optional[str],
+        spec_terms: Optional[str],
+        defaults: Dict[str, Dict[HookType, str]],
+    ) -> str:
         page_defaults = defaults.get(page_type or "", {})
-        fallback = buyer_angle or spec_terms or "Buyer Checklist and Selection Criteria"
+        base = buyer_angle or spec_terms
+        if base:
+            base_lower = base.lower()
+            if "moq" in base_lower and "lead time" in base_lower:
+                compact = {
+                    HookType.DATA: "MOQ, Lead Time, Supplier Benchmarks",
+                    HookType.PROBLEM: "MOQ, Lead Time, Buying Risks",
+                    HookType.HOW_TO: "MOQ, Samples, Supplier Shortlisting",
+                    HookType.QUESTION: "MOQ, Lead Time, Buyer Questions",
+                    HookType.STORY: "MOQ, Samples, Buyer Lessons",
+                    HookType.CONTROVERSY: "MOQ, Lead Time, Hidden Tradeoffs",
+                }
+                return compact.get(hook_type, "MOQ, Lead Time, Supplier Fit")
+            mappings = {
+                HookType.DATA: "Supplier Benchmarks",
+                HookType.PROBLEM: "Buying Risks",
+                HookType.HOW_TO: "Supplier Shortlisting",
+                HookType.QUESTION: "Quote Questions",
+                HookType.STORY: "Buyer Lessons",
+                HookType.CONTROVERSY: "Hidden Tradeoffs",
+            }
+            return f"{base} and {mappings.get(hook_type, 'Buyer Criteria')}"
+        return page_defaults.get(hook_type, "Supplier Fit, Quote Checks, and Buying Criteria")
 
-        if hook_type == HookType.DATA and buyer_angle:
-            return f"{buyer_angle} and Buyer Checks"
-        if hook_type == HookType.PROBLEM and buyer_angle:
-            return f"{buyer_angle} and Supplier Risks"
-        if hook_type == HookType.QUESTION and buyer_angle:
-            return f"{buyer_angle} and Buyer Questions"
-        if hook_type == HookType.HOW_TO and buyer_angle:
-            return f"{buyer_angle} and Ordering Steps"
-        if hook_type == HookType.STORY and buyer_angle:
-            return f"{buyer_angle} and Buyer Lessons"
-        if hook_type == HookType.CONTROVERSY and buyer_angle:
-            return f"{buyer_angle} and Supplier Claims"
-
-        return page_defaults.get(hook_type, fallback)
+    def _traffic_tail_for_hook(
+        self,
+        hook_type: HookType,
+        page_type: Optional[str],
+        spec_terms: Optional[str],
+        defaults: Dict[str, Dict[HookType, str]],
+        search_stage: Optional[str],
+        topic_title: str,
+    ) -> str:
+        page_defaults = defaults.get(page_type or "", {})
+        search_angle = self._derive_search_angle(topic_title, spec_terms, page_type, search_stage)
+        if search_angle:
+            mappings = {
+                HookType.DATA: "Selection Signals",
+                HookType.PROBLEM: "Fit Risks",
+                HookType.HOW_TO: "Selection Logic",
+                HookType.QUESTION: "Use-Case Questions",
+                HookType.STORY: "Scenario Lessons",
+                HookType.CONTROVERSY: "Tradeoffs",
+            }
+            return f"{search_angle} and {mappings.get(hook_type, 'Use-Case Fit')}"
+        return page_defaults.get(hook_type, "Application Fit, Material Choice, and Selection Logic")
 
     def _extract_spec_terms(self, product: Dict[str, Any], topic_title: str) -> Optional[str]:
         """Build a short spec-focused tail from product or topic context."""
@@ -604,6 +699,57 @@ class HookOptimizer:
         if len(parts) == 2:
             return f"{parts[0]} and {parts[1]}"
         return ", ".join(parts[:2]) + f", and {parts[2]}"
+
+    def _derive_search_angle(
+        self,
+        topic_title: str,
+        spec_terms: Optional[str],
+        page_type: Optional[str],
+        search_stage: Optional[str],
+    ) -> Optional[str]:
+        """Build a search-oriented angle for traffic-entry titles."""
+        title_lower = topic_title.lower()
+        parts = []
+
+        if " vs " in f" {title_lower} " or " versus " in f" {title_lower} ":
+            parts.extend(["Material Tradeoffs", "Use-Case Fit"])
+        if any(term in title_lower for term in ["application", "applications", "for "]):
+            parts.append("Application Fit")
+        if any(term in title_lower for term in ["material", "glass", "pet", "hdpe", "pp"]):
+            parts.append("Material Choice")
+        if any(term in title_lower for term in ["problem", "risk", "mistake", "leak", "mismatch", "compatib"]):
+            parts.append("Failure Risks")
+        if any(term in title_lower for term in ["essential oil", "serum", "formula", "filling", "usage"]):
+            parts.append("Formula Match")
+        if spec_terms and "MOQ" not in spec_terms:
+            parts.append(spec_terms.replace(" and Buying Fit", "").replace(", and Fit", ""))
+        if search_stage == "awareness" and "Failure Risks" not in parts:
+            parts.append("Failure Risks")
+        if search_stage == "decision" and "Selection Signals" not in parts:
+            parts.append("Selection Signals")
+
+        if not parts:
+            defaults = {
+                "category_support": "Application Fit, Material Choice",
+                "product_selection": "Use-Case Fit, Material Choice",
+                "spec_comparison": "Performance Tradeoffs, Use-Case Fit",
+                "wholesale_faq": "Application Fit, Packaging Constraints",
+            }
+            base = defaults.get(page_type or "")
+            if base:
+                parts.append(base)
+
+        deduped = []
+        for part in parts:
+            normalized = part.lower().strip()
+            if normalized and normalized not in {item.lower() for item in deduped}:
+                deduped.append(part)
+
+        if not deduped:
+            return "Application Fit and Material Choice"
+        if len(deduped) == 1:
+            return deduped[0]
+        return f"{deduped[0]}, {deduped[1]}"
     
     def _build_template_context(
         self,
@@ -798,7 +944,8 @@ class HookOptimizer:
         self,
         variants: List[OptimizedTitle],
         strategy: str = "ctr",  # "ctr", "balanced", "experimental"
-        target_keyword: str = None
+        target_keyword: str = None,
+        content_lane: Optional[str] = None,
     ) -> OptimizedTitle:
         """
         Select the best title based on strategy
@@ -807,6 +954,7 @@ class HookOptimizer:
             variants: List of title variants
             strategy: Selection strategy (ctr, balanced, experimental)
             target_keyword: Optional keyword to match against
+            content_lane: Optional lane hint (traffic_entry / procurement_conversion)
 
         Returns:
             The selected OptimizedTitle
@@ -821,9 +969,18 @@ class HookOptimizer:
                 effective_ctr = variant.expected_ctr * (1 + match_score * 0.2)
                 if match_score < self.MIN_ACCEPTABLE_MATCH:
                     effective_ctr *= 0.6
+                if content_lane:
+                    effective_ctr *= 1 + self._lane_fit_score(variant.title, content_lane) * 0.12
                 scored_variants.append((variant, effective_ctr, match_score))
         else:
-            scored_variants = [(variant, variant.expected_ctr, 1.0) for variant in variants]
+            scored_variants = [
+                (
+                    variant,
+                    variant.expected_ctr * (1 + (self._lane_fit_score(variant.title, content_lane) * 0.12 if content_lane else 0)),
+                    1.0,
+                )
+                for variant in variants
+            ]
 
         eligible_variants = [
             item for item in scored_variants
@@ -856,3 +1013,17 @@ class HookOptimizer:
         
         else:
             return max(eligible_variants, key=lambda item: item[1])[0]
+
+    def _lane_fit_score(self, title: str, content_lane: Optional[str]) -> float:
+        """Measure whether a title's language matches the requested lane."""
+        if not content_lane:
+            return 0.0
+
+        title_lower = title.lower()
+        if content_lane == "procurement_conversion":
+            terms = self.PROCUREMENT_SIGNALS
+        else:
+            terms = self.TRAFFIC_SIGNALS
+
+        hits = sum(1 for term in terms if term in title_lower)
+        return min(1.0, hits / 4)

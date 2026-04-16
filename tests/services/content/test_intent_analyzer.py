@@ -165,3 +165,34 @@ class TestSearchIntentAnalyzer:
         # Must NOT contain these generic patterns
         forbidden = ["What You Need to Know", "Best", "Review", "Top", "Ultimate Guide"]
         assert not any(pattern in title for pattern in forbidden)
+
+    def test_route_product_head_query_to_procurement_lane(self):
+        analyzer = SearchIntentAnalyzer()
+
+        route = analyzer.route_content_lane(
+            "dropper bottle 100ml",
+            catalog_context={
+                "page_type": "wholesale_faq",
+                "supporting_products": [{"name": "100ml Dropper Bottle"}],
+                "target_category_name": "Dropper Bottles",
+            },
+        )
+
+        assert route.content_lane == "procurement_conversion"
+        assert route.search_stage == "decision"
+        assert route.confidence >= 0.7
+
+    def test_route_comparison_query_to_traffic_entry_lane(self):
+        analyzer = SearchIntentAnalyzer()
+
+        route = analyzer.route_content_lane(
+            "glass vs pet dropper bottle for serum",
+            catalog_context={
+                "page_type": "spec_comparison",
+                "target_category_name": "Dropper Bottles",
+            },
+        )
+
+        assert route.content_lane == "traffic_entry"
+        assert route.search_stage == "consideration"
+        assert route.signal_scores["traffic"] > route.signal_scores["commercial"]

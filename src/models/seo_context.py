@@ -101,6 +101,16 @@ class SEOContext(BaseModel):
     slug: Optional[str] = None
     categories: List[str] = Field(default_factory=lambda: ["Blog", "Guides"])
     tags: List[str] = Field(default_factory=list)
+    content_lane: str = Field(
+        default="procurement_conversion",
+        description="Primary article role: procurement_conversion or traffic_entry."
+    )
+    content_lane_confidence: Optional[float] = None
+    content_lane_signals: Dict[str, Any] = Field(default_factory=dict)
+    search_stage: Optional[str] = Field(
+        default=None,
+        description="Normalized search stage inferred for the query, e.g. awareness/consideration/decision."
+    )
 
     # ========== Catalog Context ==========
     page_type: str = Field(default="category_support")
@@ -356,6 +366,10 @@ class SEOContext(BaseModel):
             "internal_links": [link.model_dump() for link in self.internal_links],
             "products": self.supporting_products,
             "supporting_tags": self.supporting_tags,
+            "content_lane": self.content_lane,
+            "content_lane_confidence": self.content_lane_confidence,
+            "content_lane_signals": self.content_lane_signals,
+            "search_stage": self.search_stage,
             "article_content_type": self.article_content_type.value if self.article_content_type else "general",
             "planned_outline": self.planned_outline or [],
         }

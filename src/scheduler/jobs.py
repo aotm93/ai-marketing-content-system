@@ -309,9 +309,38 @@ def _apply_catalog_context_to_seo_context(seo_context, catalog_context: Dict[str
     seo_context.supporting_tags = catalog_context.get("supporting_tags", [])
     seo_context.decision_questions = catalog_context.get("decision_questions", [])
     seo_context.commercial_facts = catalog_context.get("commercial_facts", [])
+    seo_context.content_lane = catalog_context.get("content_lane") or seo_context.content_lane
+    seo_context.content_lane_confidence = catalog_context.get("content_lane_confidence")
+    seo_context.content_lane_signals = catalog_context.get("content_lane_signals", {})
+    seo_context.search_stage = catalog_context.get("search_stage") or seo_context.search_stage
 
     if seo_context.supporting_tags:
         seo_context.tags = list(dict.fromkeys(seo_context.tags + seo_context.supporting_tags[:6]))
+
+
+def _route_catalog_context(keyword: str, catalog_context: Dict[str, Any]) -> Dict[str, Any]:
+    """Attach deterministic lane-routing metadata before title/content planning."""
+    enriched_context = dict(catalog_context or {})
+
+    try:
+        from src.services.content.intent_analyzer import SearchIntentAnalyzer
+
+        route_signal = SearchIntentAnalyzer().route_content_lane(keyword, catalog_context=enriched_context)
+        enriched_context["content_lane"] = route_signal.content_lane
+        enriched_context["content_lane_confidence"] = route_signal.confidence
+        enriched_context["content_lane_signals"] = {
+            "scores": route_signal.signal_scores,
+            "reasons": route_signal.reasons,
+        }
+        enriched_context["search_stage"] = route_signal.search_stage
+    except Exception as exc:
+        logger.debug(f"Content lane routing failed for '{keyword}': {exc}")
+        enriched_context.setdefault("content_lane", "procurement_conversion")
+        enriched_context.setdefault("content_lane_confidence", 0.55)
+        enriched_context.setdefault("content_lane_signals", {"scores": {}, "reasons": ["routing_fallback"]})
+        enriched_context.setdefault("search_stage", "decision")
+
+    return enriched_context
 
 
 def _add_catalog_links(seo_context) -> None:
@@ -826,7 +855,7 @@ def _truncate_meta_description(text: str, max_length: int = 160) -> str:
 
 
 def _generate_catalog_meta_description(seo_context, target_keyword: str, current_year: int) -> str:
-    """Generate a procurement-oriented meta description tied to the chosen landing page."""
+    """Generate a lane-aware meta description tied to the chosen landing page."""
     if not seo_context:
         return ""
 
@@ -835,6 +864,7 @@ def _generate_catalog_meta_description(seo_context, target_keyword: str, current
     primary_type = primary.get("type")
     keyword = target_keyword or getattr(seo_context, "target_keyword", "") or getattr(seo_context, "topic_title", "")
     page_type = getattr(seo_context, "page_type", "") or "category_support"
+    content_lane = getattr(seo_context, "content_lane", "procurement_conversion")
 
     routing_phrase = ""
     if primary_name:
@@ -854,6 +884,24 @@ def _generate_catalog_meta_description(seo_context, target_keyword: str, current
         "category_support": "options, customization, and sourcing checkpoints",
     }
     requirement_text = requirement_map.get(page_type, "specs, sourcing checkpoints, and buyer trade-offs")
+
+    if content_lane == "traffic_entry":
+        traffic_requirement_map = {
+            "wholesale_faq": "application fit, packaging constraints, and decision triggers",
+            "product_selection": "material fit, closure match, and use-case trade-offs",
+            "spec_comparison": "spec trade-offs, formula fit, and performance differences",
+            "category_support": "use cases, material choices, and shortlisting signals",
+        }
+        traffic_text = traffic_requirement_map.get(page_type, "application fit, trade-offs, and selection signals")
+        if routing_phrase and keyword:
+            description = (
+                f"Compare {keyword}, {traffic_text}. {routing_phrase} when you are ready to move from search research to a shortlist in {current_year}."
+            )
+        elif keyword:
+            description = f"Compare {keyword}, {traffic_text}, and real selection trade-offs before you shortlist options."
+        else:
+            description = f"Compare {traffic_text} and real selection trade-offs before you shortlist options."
+        return _truncate_meta_description(description)
 
     if routing_phrase and keyword:
         description = (
@@ -966,6 +1014,8 @@ def _build_procurement_next_step_block(seo_context) -> str:
 def _append_procurement_next_step_block(content_html: str, seo_context) -> str:
     """Append the procurement routing module unless the article already includes one."""
     content_html = content_html or ""
+    if seo_context and getattr(seo_context, "content_lane", "procurement_conversion") != "procurement_conversion":
+        return content_html
     if 'class="buyer-next-step"' in content_html.lower():
         return content_html
 
@@ -974,6 +1024,85 @@ def _append_procurement_next_step_block(content_html: str, seo_context) -> str:
         return content_html
 
     return content_html.rstrip() + "\n\n" + next_step_block
+
+
+async def _generate_meta_payload(
+    seo_context,
+    target_keyword: str,
+    content_html: str,
+    ai_provider,
+    current_year: int,
+) -> Dict[str, str]:
+    """Generate synchronized meta payload before publish-readiness scoring."""
+    if seo_context and seo_context.selected_title:
+        selected_title = seo_context.selected_title
+        hook_type = seo_context.title_hook_type.value if seo_context.title_hook_type else "general"
+
+        meta_description = _generate_catalog_meta_description(seo_context, target_keyword, current_year)
+        if not meta_description:
+            meta_prompt = f"""
+Generate a compelling meta description for an article titled:
+"{selected_title}"
+
+Target Keyword: {target_keyword}
+Hook Type: {hook_type}
+Current Year: {current_year}
+Content Lane: {getattr(seo_context, 'content_lane', 'procurement_conversion')}
+Search Stage: {getattr(seo_context, 'search_stage', 'unspecified')}
+
+Requirements:
+- MUST be 150-160 characters maximum
+- MUST align with the {hook_type} hook type of the title
+- MUST align with the chosen content lane and search stage
+- Include a compelling but lane-appropriate call-to-action
+- Mention "Updated {current_year}" if relevant, but do not overuse
+- Focus on the value proposition for {seo_context.target_audience if seo_context else 'readers'}
+
+Output ONLY the meta description text (no JSON, no quotes).
+"""
+            meta_description = await ai_provider.generate_text(meta_prompt, temperature=0.6, max_tokens=200)
+            meta_description = meta_description.strip().replace('"', '')
+            meta_description = _truncate_meta_description(meta_description)
+
+        excerpt = _build_excerpt_from_html(
+            content_html or "",
+            fallback=meta_description,
+            max_length=220,
+        )
+
+        seo_context.meta_title = selected_title
+        seo_context.meta_description = meta_description
+        logger.info(f"Synchronized meta generated for title: {selected_title}")
+        logger.info(f"Meta description: {meta_description[:60]}...")
+        return {
+            "title": selected_title,
+            "meta_description": meta_description,
+            "excerpt": excerpt,
+        }
+
+    meta_prompt = f"""
+Generate JSON SEO Metadata for this article about "{target_keyword}".
+Current Year: {current_year}
+
+Format: {{"title": "...", "meta_description": "...", "excerpt": "..."}}
+
+Guidelines:
+- Title: Use ONE of these formats randomly:
+  1. "How to [X]..." (NO year)
+  2. "[N] Best [X] ({current_year} Review)" (Use year)
+  3. "The Complete [X] Guide" (NO year)
+  4. "[X] Explained: What You Need to Know" (NO year)
+  5. "Top [N] [X] Trends for {current_year}" (Use year)
+
+- Desc: <160 chars, compelling hook.
+"""
+    meta_json_str = await ai_provider.generate_text(meta_prompt, temperature=0.5)
+
+    try:
+        clean_json = meta_json_str.replace("```json", "").replace("```", "").strip()
+        return json.loads(clean_json)
+    except (json.JSONDecodeError, KeyError, ValueError):
+        return {"title": f"{target_keyword} Guide", "meta_description": "Read more...", "excerpt": ""}
 
 
 async def content_generation_job(data: Dict[str, Any]) -> Dict[str, Any]:
@@ -1086,6 +1215,7 @@ async def content_generation_job(data: Dict[str, Any]) -> Dict[str, Any]:
                 for _, opp, gsc_catalog_context in sorted(scored_gsc, key=lambda item: item[0], reverse=True):
                     if opp.query.lower() not in used_keyword_set:
                         target_keyword = opp.query
+                        gsc_catalog_context = _route_catalog_context(target_keyword, gsc_catalog_context)
                         target_context = {
                             "source": "GSC (Optimization)",
                             "metric": f"Pos: {opp.position}, Impr: {opp.impressions}, RouteScore: {round(_score_catalog_context_for_selection(opp.query, gsc_catalog_context), 2)}"
@@ -1118,7 +1248,12 @@ async def content_generation_job(data: Dict[str, Any]) -> Dict[str, Any]:
                             catalog_context=gsc_catalog_context,
                         )
                         if optimized_titles:
-                            best_title = await hook_optimizer.select_best_title(optimized_titles, strategy="balanced", target_keyword=target_keyword)
+                            best_title = await hook_optimizer.select_best_title(
+                                optimized_titles,
+                                strategy="balanced",
+                                target_keyword=target_keyword,
+                                content_lane=gsc_catalog_context.get("content_lane"),
+                            )
                             selected_title = best_title.title
                             logger.info(f"Generated optimized title for GSC keyword: {selected_title}")
                         else:
@@ -1238,6 +1373,10 @@ async def content_generation_job(data: Dict[str, Any]) -> Dict[str, Any]:
                             "decision_questions": selected.decision_questions,
                             "commercial_facts": selected.commercial_facts,
                         }
+                        content_aware_catalog_context = _route_catalog_context(
+                            target_keyword,
+                            content_aware_catalog_context,
+                        )
                         
                         # Generate optimized titles
                         optimized_titles = await hook_optimizer.generate_optimized_titles(
@@ -1246,7 +1385,12 @@ async def content_generation_job(data: Dict[str, Any]) -> Dict[str, Any]:
                             catalog_context=content_aware_catalog_context,
                         )
                         if optimized_titles:
-                            best_title = await hook_optimizer.select_best_title(optimized_titles, strategy="balanced", target_keyword=target_keyword)
+                            best_title = await hook_optimizer.select_best_title(
+                                optimized_titles,
+                                strategy="balanced",
+                                target_keyword=target_keyword,
+                                content_lane=content_aware_catalog_context.get("content_lane"),
+                            )
                             selected_title = best_title.title
                             logger.info(f"Generated optimized title for Content-Aware keyword: {selected_title}")
                         else:
@@ -1318,6 +1462,7 @@ async def content_generation_job(data: Dict[str, Any]) -> Dict[str, Any]:
                 for _, kw, api_catalog_context in sorted(scored_api_keywords, key=lambda item: item[0], reverse=True):
                     if kw.keyword.lower() not in used_keyword_set:
                         target_keyword = kw.keyword
+                        api_catalog_context = _route_catalog_context(target_keyword, api_catalog_context)
                         target_context = {
                             "source": "KeywordAPI (Expansion)",
                             "metric": (
@@ -1355,7 +1500,12 @@ async def content_generation_job(data: Dict[str, Any]) -> Dict[str, Any]:
                                 catalog_context=api_catalog_context,
                             )
                             if optimized_titles:
-                                best_title = await hook_optimizer.select_best_title(optimized_titles, strategy="balanced", target_keyword=target_keyword)
+                                best_title = await hook_optimizer.select_best_title(
+                                    optimized_titles,
+                                    strategy="balanced",
+                                    target_keyword=target_keyword,
+                                    content_lane=api_catalog_context.get("content_lane"),
+                                )
                                 selected_title = best_title.title
                                 logger.info(f"Generated optimized title for Keyword API keyword: {selected_title}")
                             else:
@@ -1438,6 +1588,7 @@ async def content_generation_job(data: Dict[str, Any]) -> Dict[str, Any]:
                         selected_topic = topic
                         target_keyword = topic.title
                         ci_catalog_context = _match_catalog_context(topic.title, website_profile)
+                        ci_catalog_context = _route_catalog_context(target_keyword, ci_catalog_context)
 
                         # Generate optimized title variants using HookOptimizer
                         logger.info(f"Generating optimized title variants for: {topic.title}")
@@ -1448,7 +1599,12 @@ async def content_generation_job(data: Dict[str, Any]) -> Dict[str, Any]:
                         )
 
                         # Select best title based on CTR strategy
-                        best_title = await hook_optimizer.select_best_title(optimized_titles, strategy="balanced", target_keyword=target_keyword)
+                        best_title = await hook_optimizer.select_best_title(
+                            optimized_titles,
+                            strategy="balanced",
+                            target_keyword=target_keyword,
+                            content_lane=ci_catalog_context.get("content_lane"),
+                        )
 
                         # Create unified SEOContext
                         seo_context = SEOContext(
@@ -1527,6 +1683,7 @@ async def content_generation_job(data: Dict[str, Any]) -> Dict[str, Any]:
                         value_score=0.55
                     )
                     emergency_catalog_context = _match_catalog_context(target_keyword, website_profile)
+                    emergency_catalog_context = _route_catalog_context(target_keyword, emergency_catalog_context)
 
                     # Generate optimized title
                     optimized_titles = await hook_optimizer.generate_optimized_titles(
@@ -1535,7 +1692,12 @@ async def content_generation_job(data: Dict[str, Any]) -> Dict[str, Any]:
                         catalog_context=emergency_catalog_context,
                     )
                     if optimized_titles:
-                        best_title = await hook_optimizer.select_best_title(optimized_titles, strategy="balanced")
+                        best_title = await hook_optimizer.select_best_title(
+                            optimized_titles,
+                            strategy="balanced",
+                            target_keyword=target_keyword,
+                            content_lane=emergency_catalog_context.get("content_lane"),
+                        )
                         selected_title = best_title.title
                         logger.info(f"Emergency fallback optimized title: {selected_title}")
                     else:
@@ -1742,7 +1904,18 @@ async def content_generation_job(data: Dict[str, Any]) -> Dict[str, Any]:
             if seo_context:
                 content_html = _append_procurement_next_step_block(content_html, seo_context)
 
-        # --- Layer 4.2: Quality Gate ---
+        # --- Layer 4.2: Meta generation before publish-readiness scoring ---
+        current_year = datetime.now().year
+        content_for_meta = seo_context.content_html if seo_context and seo_context.content_html else content_html
+        meta_data = await _generate_meta_payload(
+            seo_context=seo_context,
+            target_keyword=target_keyword,
+            content_html=content_for_meta,
+            ai_provider=ai_provider,
+            current_year=current_year,
+        )
+
+        # --- Layer 4.3: Quality Gate ---
         from src.services.quality_gate import EnhancedQualityGate
 
         quality_gate = EnhancedQualityGate()
@@ -1771,6 +1944,10 @@ async def content_generation_job(data: Dict[str, Any]) -> Dict[str, Any]:
             components=content_components,
             page_type=seo_context.page_type if seo_context else None,
             catalog_context=catalog_context if seo_context else None,
+            meta_title=meta_data.get("title"),
+            meta_description=meta_data.get("meta_description"),
+            content_lane=seo_context.content_lane if seo_context else None,
+            search_stage=seo_context.search_stage if seo_context else None,
         )
 
         quality_summary = {
@@ -1779,6 +1956,8 @@ async def content_generation_job(data: Dict[str, Any]) -> Dict[str, Any]:
             "passed": quality_diagnostic.passed,
             "can_publish": quality_diagnostic.can_publish,
             "issues": len(quality_diagnostic.issues),
+            "lane_alignment_score": quality_diagnostic.metrics.get("lane_alignment_score"),
+            "content_lane": quality_diagnostic.metrics.get("content_lane"),
             "top_recommendations": quality_diagnostic.top_recommendations[:3],
         }
         result["steps"].append({"step": "quality_gate", "data": quality_summary})
@@ -1792,85 +1971,6 @@ async def content_generation_job(data: Dict[str, Any]) -> Dict[str, Any]:
                 f"score={quality_diagnostic.overall_score:.1f}, issues={len(quality_diagnostic.issues)}"
             )
             auto_publish = False
-
-        # 4.3 Synchronized Meta Generation (using selected title from SEOContext)
-        current_year = datetime.now().year
-        
-        if seo_context and seo_context.selected_title:
-            # Use SEOContext for synchronized meta generation
-            # Title is already selected - DON'T regenerate it
-            selected_title = seo_context.selected_title
-            hook_type = seo_context.title_hook_type.value if seo_context.title_hook_type else "general"
-
-            meta_description = _generate_catalog_meta_description(seo_context, target_keyword, current_year)
-            if not meta_description:
-                # Fallback for non-catalog contexts
-                meta_prompt = f"""
-Generate a compelling meta description for an article titled:
-"{selected_title}"
-
-Target Keyword: {target_keyword}
-Hook Type: {hook_type}
-Current Year: {current_year}
-
-Requirements:
-- MUST be 150-160 characters maximum
-- MUST align with the {hook_type} hook type of the title
-- Include a compelling call-to-action
-- Mention "Updated {current_year}" if relevant, but do not overuse
-- Focus on the value proposition for {seo_context.target_audience if seo_context else 'readers'}
-
-Output ONLY the meta description text (no JSON, no quotes).
-"""
-                meta_description = await ai_provider.generate_text(meta_prompt, temperature=0.6, max_tokens=200)
-                meta_description = meta_description.strip().replace('"', '')
-                meta_description = _truncate_meta_description(meta_description)
-
-            excerpt = _build_excerpt_from_html(
-                seo_context.content_html if seo_context and seo_context.content_html else "",
-                fallback=meta_description,
-                max_length=220,
-            )
-            
-            meta_data = {
-                "title": selected_title,  # CRITICAL: Use the selected title, don't regenerate!
-                "meta_description": meta_description,
-                "excerpt": excerpt
-            }
-            
-            # Update SEOContext
-            seo_context.meta_title = selected_title
-            seo_context.meta_description = meta_description
-            
-            logger.info(f"Synchronized meta generated for title: {selected_title}")
-            logger.info(f"Meta description: {meta_description[:60]}...")
-            
-        else:
-            # Legacy meta generation (for backward compatibility)
-            meta_prompt = f"""
-            Generate JSON SEO Metadata for this article about "{target_keyword}".
-            Current Year: {current_year}
-            
-            Format: {{"title": "...", "meta_description": "...", "excerpt": "..."}}
-            
-            Guidelines:
-            - Title: Use ONE of these formats randomly:
-              1. "How to [X]..." (NO year)
-              2. "[N] Best [X] ({current_year} Review)" (Use year)
-              3. "The Complete [X] Guide" (NO year)
-              4. "[X] Explained: What You Need to Know" (NO year)
-              5. "Top [N] [X] Trends for {current_year}" (Use year)
-            
-            - Desc: <160 chars, compelling hook.
-            """
-            meta_json_str = await ai_provider.generate_text(meta_prompt, temperature=0.5)
-            
-            try:
-                import json
-                clean_json = meta_json_str.replace("```json", "").replace("```", "").strip()
-                meta_data = json.loads(clean_json)
-            except (json.JSONDecodeError, KeyError, ValueError):
-                meta_data = {"title": f"{target_keyword} Guide", "meta_description": "Read more...", "excerpt": ""}
 
         result["steps"].append({ 
             "step": "creation", 

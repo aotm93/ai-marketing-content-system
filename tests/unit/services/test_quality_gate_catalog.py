@@ -125,3 +125,73 @@ class TestCatalogAwareQualityGate:
 
         assert diagnostic.can_publish is True
         assert diagnostic.overall_score >= 60
+
+    @pytest.mark.asyncio
+    async def test_traffic_entry_meta_and_cta_are_scored_for_lane_fit(self):
+        service = EnhancedQualityGate()
+        service.MIN_WORD_COUNT = 80
+
+        content = """
+        <h1>Glass vs PET Dropper Bottle for Serum</h1>
+        <p>Choosing between glass and PET depends on formula stability, light protection, breakage tolerance, and dosing expectations.</p>
+        <p>Readers can <a href="https://example.com/category/dropper-bottles">browse dropper bottles</a> to compare options after reviewing the material trade-offs.</p>
+        <h2>Comparison</h2>
+        <p>Glass supports better premium positioning, while PET reduces breakage risk and freight weight for travel-size formats.</p>
+        """
+
+        diagnostic = await service.full_diagnostic(
+            content=content,
+            content_id="traffic_lane_ok",
+            target_keyword="glass vs pet dropper bottle for serum",
+            page_type="spec_comparison",
+            catalog_context={
+                "page_type": "spec_comparison",
+                "content_lane": "traffic_entry",
+                "search_stage": "consideration",
+                "target_category_name": "Dropper Bottles",
+                "target_category_url": "https://example.com/category/dropper-bottles",
+            },
+            meta_title="Glass vs PET Dropper Bottle for Serum: Material Choice and Tradeoffs",
+            meta_description="Compare glass vs PET dropper bottle options for serum packaging, formula fit, and breakage trade-offs before you shortlist the right format.",
+            content_lane="traffic_entry",
+            search_stage="consideration",
+        )
+
+        lane_titles = [issue.title.lower() for issue in diagnostic.issues]
+        assert diagnostic.metrics["lane_alignment_score"] is not None
+        assert diagnostic.metrics["lane_alignment_score"] >= 70
+        assert not any("traffic-entry meta description lacks search-entry framing" in title for title in lane_titles)
+
+    @pytest.mark.asyncio
+    async def test_procurement_lane_blocks_weak_meta_and_missing_conversion_cta(self):
+        service = EnhancedQualityGate()
+        service.MIN_WORD_COUNT = 60
+
+        content = """
+        <h1>100ml Dropper Bottle Wholesale</h1>
+        <p>This article discusses packaging options in a general way.</p>
+        <p>It mentions materials and bottle choices but does not tell the buyer how to shortlist suppliers or request samples.</p>
+        """
+
+        diagnostic = await service.full_diagnostic(
+            content=content,
+            content_id="procurement_lane_weak",
+            target_keyword="100ml dropper bottle wholesale",
+            page_type="wholesale_faq",
+            catalog_context={
+                "page_type": "wholesale_faq",
+                "content_lane": "procurement_conversion",
+                "search_stage": "decision",
+                "target_category_name": "Dropper Bottles",
+                "target_category_url": "https://example.com/category/dropper-bottles",
+            },
+            meta_title="100ml Dropper Bottle Wholesale Guide",
+            meta_description="Compare 100ml dropper bottle options and material choices for packaging projects.",
+            content_lane="procurement_conversion",
+            search_stage="decision",
+        )
+
+        titles = [issue.title.lower() for issue in diagnostic.issues]
+        assert any("procurement-conversion meta description lacks buying intent signals" in title for title in titles)
+        assert any("procurement-conversion page lacks a conversion cta" in title for title in titles)
+        assert diagnostic.metrics["lane_alignment_score"] < 70

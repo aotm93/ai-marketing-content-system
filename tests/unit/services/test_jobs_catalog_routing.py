@@ -116,3 +116,26 @@ class TestJobsCatalogRouting:
         assert "review 30ml pet fine mist spray bottle" in meta.lower()
         assert "inspect the shortlisted product" in block.lower()
         assert "need comparable alternatives?" in block.lower()
+
+    def test_traffic_entry_meta_and_cta_do_not_force_procurement_language(self):
+        seo_context = SEOContext(
+            source="test",
+            target_keyword="glass vs pet dropper bottle for serum",
+            topic_title="glass vs pet dropper bottle for serum",
+            selected_title="Glass vs PET Dropper Bottle for Serum: Material Choice, Formula Match, and Tradeoffs",
+            target_category_name="Dropper Bottles",
+            target_category_url="https://example.com/category/dropper-bottles",
+            primary_taxonomy_type="category",
+            primary_taxonomy_name="Dropper Bottles",
+            primary_taxonomy_url="https://example.com/category/dropper-bottles",
+            page_type="spec_comparison",
+            content_lane="traffic_entry",
+            search_stage="consideration",
+        )
+
+        meta = _generate_catalog_meta_description(seo_context, seo_context.target_keyword, 2026)
+        content = _append_procurement_next_step_block("<h1>Test</h1><p>Body</p>", seo_context)
+
+        assert "selection trade-offs" in meta.lower() or "formula fit" in meta.lower()
+        assert "buying plan" not in meta.lower()
+        assert 'class="buyer-next-step"' not in content.lower()

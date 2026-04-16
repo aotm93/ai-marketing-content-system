@@ -174,3 +174,36 @@ class TestHookOptimizerIntegration:
         assert all(not title.lower().endswith((" and", " or", " for", " to", " with")) for title in rendered_titles)
         assert any("buyer questions" in title.lower() for title in rendered_titles)
         assert any("buying risks" in title.lower() or "supplier risks" in title.lower() for title in rendered_titles)
+
+    def test_traffic_entry_lane_avoids_procurement_template_tails(self):
+        optimizer = HookOptimizer()
+
+        topic = ContentTopic(
+            title="glass vs pet dropper bottle for serum",
+            angle="material comparison for serum packaging",
+            hook_type=HookType.DATA,
+            industry="packaging",
+            target_audience="b2b buyers",
+            business_intent=0.72,
+            trend_score=0.6,
+            competition_score=0.45,
+            differentiation_score=0.75,
+            brand_alignment_score=0.8,
+            value_score=0.77,
+        )
+
+        titles = optimizer.generate_optimized_titles_sync(
+            topic,
+            count=5,
+            catalog_context={
+                "page_type": "spec_comparison",
+                "content_lane": "traffic_entry",
+                "search_stage": "consideration",
+                "target_category_name": "Dropper Bottles",
+            },
+        )
+
+        rendered_titles = [title.title.lower() for title in titles]
+        assert any("tradeoff" in title or "fit" in title or "selection" in title for title in rendered_titles)
+        assert all("buyer checks" not in title for title in rendered_titles)
+        assert all("moq, lead time" not in title for title in rendered_titles)

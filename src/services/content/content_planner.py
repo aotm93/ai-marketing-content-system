@@ -114,18 +114,41 @@ class ContentPlannerService:
             if t != ArticleContentType.GENERAL
         )
         page_type_note = f"Page type context: {ctx.page_type}" if ctx.page_type else ""
+        lane_note = (
+            f"Content lane: {ctx.content_lane}. "
+            f"Search stage: {ctx.search_stage or 'unspecified'}."
+            if ctx.content_lane
+            else ""
+        )
         catalog_note = (
             f"Primary taxonomy: {ctx.primary_taxonomy_name} ({ctx.primary_taxonomy_type})"
             if ctx.primary_taxonomy_name
             else ""
         )
+        lane_guidance = self._build_lane_guidance(ctx.content_lane)
 
         return (
             f"{self.SYSTEM_PROMPT}\n\n"
             f"Title: {title}\n"
             f"Target keyword: {keyword}\n"
             f"{page_type_note}\n"
+            f"{lane_note}\n"
             f"{catalog_note}\n\n"
+            f"{lane_guidance}\n\n"
             f"Content type signals:\n{type_hints}\n\n"
             f"Generate 4–6 outline sections appropriate for this article's intent."
+        )
+
+    def _build_lane_guidance(self, content_lane: Optional[str]) -> str:
+        """Give the planner role-specific structure constraints before outline selection."""
+        if content_lane == "traffic_entry":
+            return (
+                "Lane guidance: This page is a search-entry page. Open from scenario, comparison, "
+                "application fit, or risk framing. Avoid encyclopedia tone and avoid defaulting to "
+                "MOQ/lead-time-first structure unless the query explicitly demands it."
+            )
+        return (
+            "Lane guidance: This page is a procurement-conversion page. Open from buyer decision stakes, "
+            "supplier qualification, MOQ/cost drivers, sample/QC process, or quotation variables. "
+            "Keep the content commercially useful rather than generic."
         )

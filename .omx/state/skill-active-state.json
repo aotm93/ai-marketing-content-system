@@ -1,0 +1,33 @@
+{
+  "version": 1,
+  "active": true,
+  "skill": "ralph",
+  "keyword": "Ralph",
+  "phase": "planning",
+  "activated_at": "2026-04-16T08:25:42.290Z",
+  "updated_at": "2026-04-16T08:25:42.290Z",
+  "source": "keyword-detector",
+  "session_id": "",
+  "thread_id": "019d955e-e2b1-7052-87db-fa435b0ecf1c",
+  "turn_id": "019d955e-e7c3-7840-98ad-e0516616bd01",
+  "input_lock": {
+    "active": false,
+    "scope": "deep-interview-auto-approval",
+    "acquired_at": "2026-04-16T07:46:08.180Z",
+    "blocked_inputs": [
+      "yes",
+      "y",
+      "proceed",
+      "continue",
+      "ok",
+      "sure",
+      "go ahead",
+      "next i should"
+    ],
+    "message": "Deep interview is active; auto-approval shortcuts are blocked until the interview finishes.",
+    "released_at": "2026-04-16T08:25:42.290Z",
+    "exit_reason": "handoff"
+  },
+  "iteration": 3,
+  "last_turn_at": "2026-04-16T08:46:01.630Z"
+}

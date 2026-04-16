@@ -1,0 +1,28 @@
+# Context Snapshot
+
+- Task statement: Review and upgrade the system's title/content generation direction because generated titles keep collapsing into the same format like "Dropper Bottle 3.4oz(100ml): MOQ, Lead Time, Buyer Checks".
+- Desired outcome: A more professional, search-demand-aligned title/content strategy that can capture more Google traffic.
+- Stated solution: Audit current generation logic and upgrade SEO writing direction and title writing.
+- Probable intent hypothesis: Improve topical breadth, SERP fit, and CTR instead of producing repetitive B2B procurement-template headlines.
+- Known facts/evidence:
+  - `src/services/content/hook_optimizer.py` currently compresses many catalog titles into repeated tail buckets such as `MOQ, Lead Time, Buyer Checks` via `_catalog_tail_for_hook()` and `_shorten_tail()`.
+  - `src/services/content/intent_analyzer.py` classifies intent from shallow keyword term matching, which can over-bias titles toward buying-guide/procurement phrasing.
+  - `src/agents/content_creator.py` enforces exact H1 sync with `title_must_use`, so weak title strategy propagates directly into page content.
+  - Existing tests already codify wholesale FAQ style titles, which may be reinforcing repetition.
+- Constraints:
+  - Brownfield change inside existing SEO/content pipeline.
+  - Need to preserve query relevance and avoid generic clickbait.
+  - No new dependencies unless explicitly requested.
+- Unknowns/open questions:
+  - Should the system stay primarily focused on B2B procurement/commercial traffic, or broaden into informational/comparison/problem-solving/search-intent coverage?
+  - What title/content families are considered in-scope for this site¡¯s business model?
+  - What success criteria should define improvement: CTR, keyword breadth, uniqueness, or conversion quality?
+- Decision-boundary unknowns:
+  - Whether to change only title generation or also planner/writer prompts and content structure.
+  - Whether to optimize per SERP intent cluster or preserve current wholesale FAQ emphasis.
+- Likely codebase touchpoints:
+  - `src/services/content/hook_optimizer.py`
+  - `src/services/content/intent_analyzer.py`
+  - `src/services/content/content_planner.py`
+  - `src/agents/content_creator.py`
+  - related tests under `tests/services/content/` and `tests/agents/`

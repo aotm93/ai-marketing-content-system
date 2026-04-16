@@ -1,0 +1,28 @@
+# Deep Interview Context Snapshot
+
+- Task statement: Review the current system-generated title/content direction because titles keep collapsing into repeated patterns such as `MOQ, Lead Time, Buyer Checks` / `Supplier Risks`, which the user says are not professional or aligned with search demand.
+- Desired outcome: Clarify the target search-intent direction and produce an execution-ready brief for upgrading title writing and content-angle generation so pages can capture more qualified Google traffic.
+- Stated solution: Audit the current generation logic, identify why titles are repetitive, and redesign title/content-writing direction with professional SEO principles.
+- Probable intent hypothesis: The user wants the system to stop producing same-format procurement titles and instead generate titles/content that better match real buyer search journeys, improving impressions, CTR, and qualified traffic.
+- Known facts / evidence:
+  - `src/services/content/intent_analyzer.py:111-116` uses fixed commercial title tails like `MOQ, Lead Time, Certifications, and Audit Questions`, `Pricing Factors, MOQ, Quality Checks, and Supplier Shortlisting`, and `Buyer Checklist, Cost Drivers, and Supplier Evaluation`.
+  - `src/services/content/hook_optimizer.py:358-401` aggressively normalizes long tails into the same compressed endings such as `MOQ, Lead Time, Buyer Checks` or `MOQ, Lead Time, Supplier Risks`.
+  - `src/services/content/hook_optimizer.py:495-534` further maps multiple hook types into nearly identical buyer-angle tails like `... and Buyer Checks`, `... and Supplier Risks`, `... and Buyer Questions`.
+  - Existing tests in `tests/services/content/test_intent_analyzer.py` and `tests/services/content/test_hook_optimizer_integration.py` mostly protect against generic phrases, but do not encode richer SEO-intent diversification or SERP-style title strategies.
+- Constraints:
+  - Work happens in an existing brownfield SEO/content pipeline.
+  - No new dependencies without explicit request.
+  - Deep-interview mode should clarify requirements before implementation handoff.
+- Unknowns / open questions:
+  - Which search-intent layer should be prioritized: transactional/B2B procurement, commercial investigation, comparison, informational education, or a deliberate mix?
+  - Is the upgrade expected only for titles, or also for outline/content-angle generation and internal section framing?
+  - What success signal matters most: more impressions, higher CTR, more qualified inquiries, or reduced title duplication?
+  - What should remain out of scope: meta descriptions, content body, taxonomy routing, etc.?
+- Decision-boundary unknowns:
+  - May OMX redesign title frameworks and hook taxonomies broadly, or should it keep the current `hook_type` structure and only improve wording rules?
+  - Can the system introduce intent-specific title families per page type, or must all page types still share a common title-compression layer?
+- Likely codebase touchpoints:
+  - `src/services/content/intent_analyzer.py`
+  - `src/services/content/hook_optimizer.py`
+  - `tests/services/content/test_intent_analyzer.py`
+  - `tests/services/content/test_hook_optimizer_integration.py`
