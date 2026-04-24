@@ -86,6 +86,7 @@ class ContentCreatorAgent(BaseAgent):
         content_lane = task.get("content_lane", seo_context.get("content_lane") if seo_context else "procurement_conversion")
         content_lane_confidence = task.get("content_lane_confidence", seo_context.get("content_lane_confidence") if seo_context else None)
         search_stage = task.get("search_stage", seo_context.get("search_stage") if seo_context else None)
+        serp_role = task.get("serp_role", seo_context.get("serp_role") if seo_context else None)
         page_type = task.get("page_type", seo_context.get("page_type") if seo_context else "category_support")
         article_content_type = task.get("article_content_type", "general")
         planned_outline = task.get("planned_outline", [])
@@ -117,6 +118,7 @@ class ContentCreatorAgent(BaseAgent):
             content_lane=content_lane,
             content_lane_confidence=content_lane_confidence,
             search_stage=search_stage,
+            serp_role=serp_role,
             semantic_keywords=semantic_keywords,
             internal_links=internal_links,
             article_content_type=article_content_type,
@@ -175,6 +177,7 @@ class ContentCreatorAgent(BaseAgent):
         content_lane: str,
         content_lane_confidence: Optional[float],
         search_stage: Optional[str],
+        serp_role: Optional[str],
         semantic_keywords: List[str],
         internal_links: List[dict],
         article_content_type: Optional[str] = None,    # NEW: content type from ContentPlannerService
@@ -227,8 +230,9 @@ class ContentCreatorAgent(BaseAgent):
 5. **CONTENT LANE / SEARCH STAGE**:
    - Lane: {content_lane}
    - Search stage: {search_stage or 'unspecified'}
+   - SERP role: {serp_role or 'general'}
    - Lane confidence: {content_lane_confidence if content_lane_confidence is not None else 'N/A'}
-   {self._get_content_lane_requirements(content_lane, search_stage)}
+   {self._get_content_lane_requirements(content_lane, search_stage, serp_role)}
 
 ## RESEARCH DATA
 """
@@ -528,23 +532,38 @@ Write the complete article now:
         index = int(digest[:8], 16) % len(self.EDITORIAL_BLUEPRINTS)
         return self.EDITORIAL_BLUEPRINTS[index]
 
-    def _get_content_lane_requirements(self, content_lane: str, search_stage: Optional[str]) -> str:
+    def _get_content_lane_requirements(self, content_lane: str, search_stage: Optional[str], serp_role: Optional[str]) -> str:
         """Return lane-specific constraints so title role propagates into the article body."""
+        role_hint = self._get_serp_role_guidance(serp_role)
         if content_lane == "traffic_entry":
             return (
                 "- Open from scenario, application fit, comparison, or problem framing\n"
                 "- Make the article feel like a professional search-entry page, not an encyclopedia article\n"
                 "- Explain why the specs or trade-offs matter in a real packaging or sourcing scenario\n"
                 "- Bridge readers toward the correct category/tag/product page only after clarifying fit, risk, or selection logic\n"
-                f"- Treat the reader as a {search_stage or 'mid-funnel'} searcher who needs decision value, not beginner education"
+                f"- Treat the reader as a {search_stage or 'mid-funnel'} searcher who needs decision value, not beginner education\n"
+                f"{role_hint}"
             )
         return (
             "- Open from buyer decision stakes: supplier fit, MOQ/cost drivers, sample/QC steps, or quotation variables\n"
             "- Make the article read like a procurement-conversion page, not a generic guide\n"
             "- Include rigorous evaluation framework, inspection checklist, or decision matrix where relevant\n"
             "- Keep application context and buyer decision perspective visible even when discussing commercial details\n"
-            f"- Treat the reader as a {search_stage or 'decision-stage'} buyer who is validating suppliers and shortlists"
+            f"- Treat the reader as a {search_stage or 'decision-stage'} buyer who is validating suppliers and shortlists\n"
+            f"{role_hint}"
         )
+
+    def _get_serp_role_guidance(self, serp_role: Optional[str]) -> str:
+        """Add role-level writing direction so the article matches the exact SERP job."""
+        guidance = {
+            "application_fit": "- Focus on use-case fit, product application, and how to choose the right format for the formula or packaging scenario",
+            "material_comparison": "- Focus on side-by-side trade-offs, compatibility, durability, cost, and scenario-based recommendation logic",
+            "spec_selection": "- Focus on spec thresholds such as capacity, closure, neck finish, dosing, and material selection criteria",
+            "supplier_evaluation": "- Focus on supplier fit, audit signals, qualification criteria, quote comparison, and shortlisting logic",
+            "procurement_faq": "- Focus on concrete buyer questions around MOQ, lead time, samples, customization, QC, packaging, and shipping terms",
+            "problem_risk": "- Focus on failure risks, mismatch scenarios, buyer mistakes, and how to avoid downstream sourcing or usage problems",
+        }
+        return guidance.get(serp_role or "", "- Keep the article tightly aligned to the exact search job implied by the keyword.")
 
     def _get_content_type_guidance(self, article_content_type: Optional[str]) -> str:
         """Build content-type-specific opening/closing guidance block for the prompt."""

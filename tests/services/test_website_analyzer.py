@@ -29,3 +29,14 @@ class TestWebsiteAnalyzer:
         )
 
         assert "your bottles" not in categories
+
+    def test_extract_product_categories_filters_component_only_heads(self):
+        analyzer = WebsiteAnalyzer(wordpress_client=None)
+
+        categories = analyzer._extract_product_categories(
+            titles=["Understanding White Pumps"],
+            contents=["White pumps and caps are discussed, but the publishable entity should remain the bottle family."]
+        )
+
+        assert "white pumps" not in categories
+        assert "pumps" not in categories

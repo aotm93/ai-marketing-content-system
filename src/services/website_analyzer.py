@@ -29,6 +29,9 @@ CATEGORY_STOPWORDS = {
     "in", "my", "of", "or", "our", "the", "their", "these", "this", "those",
     "to", "top", "your"
 }
+NON_PUBLISHABLE_CATEGORY_HEADS = {
+    "pump", "pumps", "cap", "caps", "lid", "lids", "dispenser", "dispensers"
+}
 
 
 @dataclass
@@ -240,10 +243,7 @@ class WebsiteAnalyzer:
             r'\b(?:[a-z0-9-]+\s+){0,2}jars?\b',
             r'\b(?:[a-z0-9-]+\s+){0,2}containers?\b',
             r'\b(?:[a-z0-9-]+\s+){0,2}tubes?\b',
-            r'\b(?:[a-z0-9-]+\s+){0,2}pumps?\b',
-            r'\b(?:[a-z0-9-]+\s+){0,2}caps?\b',
             r'\b(?:[a-z0-9-]+\s+){0,2}packaging\b',
-            r'\b(?:[a-z0-9-]+\s+){0,2}dispensers?\b',
         ]
 
         all_text = ' '.join(titles + contents).lower()
@@ -280,6 +280,8 @@ class WebsiteAnalyzer:
         ]
 
         if head in CATEGORY_STOPWORDS:
+            return ""
+        if head in NON_PUBLISHABLE_CATEGORY_HEADS:
             return ""
 
         if not modifiers and head in {"packaging"}:

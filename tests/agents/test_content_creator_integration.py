@@ -19,6 +19,7 @@ class TestContentCreatorIntegration:
             "content_lane": "procurement_conversion",
             "content_lane_confidence": 0.81,
             "search_stage": "decision",
+            "serp_role": "procurement_faq",
             "semantic_keywords": [],
             "internal_links": [],
             "article_content_type": None,
@@ -63,6 +64,7 @@ class TestContentCreatorIntegration:
         assert "moq, lead time, customization, compliance, quality control, and quotation factors" in prompt_lower
         assert "rigorous evaluation framework, inspection checklist, or decision matrix" in prompt_lower
         assert "procurement-conversion page" in prompt_lower
+        assert "serp role: procurement_faq" in prompt_lower
 
     def test_build_prompt_includes_category_and_product_context(self):
         agent = ContentCreatorAgent()
@@ -171,6 +173,7 @@ class TestContentCreatorIntegration:
             "content_lane": "traffic_entry",
             "content_lane_confidence": 0.77,
             "search_stage": "consideration",
+            "serp_role": "material_comparison",
         })
 
         prompt = agent._build_synchronized_prompt(
@@ -184,5 +187,6 @@ class TestContentCreatorIntegration:
 
         prompt_lower = prompt.lower()
         assert "lane: traffic_entry" in prompt_lower
+        assert "serp role: material_comparison" in prompt_lower
         assert "search-entry page" in prompt_lower
         assert "scenario, application fit, comparison, or problem framing" in prompt_lower

@@ -34,6 +34,7 @@ class ContentRouteSignal:
     content_lane: str
     confidence: float
     search_stage: str
+    serp_role: str
     signal_scores: Dict[str, float]
     reasons: List[str]
 
@@ -55,7 +56,7 @@ class SearchIntentAnalyzer:
     }
     TRAFFIC_TERMS = {
         "vs", "versus", "difference", "compare", "comparison", "application", "applications",
-        "use case", "use cases", "for", "best", "material", "materials", "compatibility",
+        "use case", "use cases", "best", "material", "materials", "compatibility",
         "problem", "problems", "risk", "risks", "mistake", "mistakes", "choose", "selection",
         "fit", "tradeoff", "trade-offs", "tradeoffs", "why", "how to", "prevent", "avoid"
     }
@@ -65,12 +66,24 @@ class SearchIntentAnalyzer:
     }
     CONSIDERATION_STAGE_TERMS = {
         "best", "compare", "comparison", "vs", "versus", "material", "materials", "choose",
-        "selection", "fit", "application", "applications", "for", "difference"
+        "selection", "fit", "application", "applications", "difference"
     }
     AWARENESS_STAGE_TERMS = {
         "why", "problem", "problems", "risk", "risks", "mistake", "mistakes", "prevent",
         "avoid", "compatible", "compatibility"
     }
+    SUPPLIER_ROLE_TERMS = {
+        "supplier", "suppliers", "manufacturer", "manufacturers", "factory", "audit",
+        "quote", "quotes", "qualification"
+    }
+    PROCUREMENT_FAQ_TERMS = {
+        "moq", "lead time", "lead-time", "sample", "samples", "shipping", "shipment",
+        "customization", "packaging terms", "packaging"
+    }
+    MATERIAL_COMPARISON_TERMS = {"vs", "versus", "compare", "comparison", "difference"}
+    APPLICATION_FIT_TERMS = {"application", "applications", "use case", "use cases", "formula", "fit"}
+    SPEC_SELECTION_TERMS = {"material", "materials", "capacity", "closure", "selection", "choose", "best"}
+    PROBLEM_RISK_TERMS = {"problem", "problems", "risk", "risks", "mistake", "mistakes", "leak", "mismatch", "compatibility"}
 
     INTENT_PATTERNS = {
         UserIntent.PROBLEM_SOLVING: ["fix", "prevent", "solve", "cracking", "issue", "problem", "repair"],
@@ -136,6 +149,7 @@ class SearchIntentAnalyzer:
             or catalog_context.get("primary_taxonomy_name")
         )
         search_stage = self._infer_search_stage(combined_text, catalog_context, product_head)
+        serp_role = self._infer_serp_role(combined_text, catalog_context, search_stage, product_head)
         intent_signal = self.analyze_intent(keyword, related_keywords=related_keywords or [])
 
         commercial_score = 0.1
@@ -196,6 +210,7 @@ class SearchIntentAnalyzer:
             content_lane=lane,
             confidence=round(confidence, 3),
             search_stage=search_stage,
+            serp_role=serp_role,
             signal_scores={
                 "commercial": round(commercial_score, 3),
                 "traffic": round(traffic_score, 3),
@@ -282,6 +297,32 @@ class SearchIntentAnalyzer:
         if product_head:
             return "decision"
         return "consideration"
+
+    def _infer_serp_role(
+        self,
+        text: str,
+        catalog_context: Dict[str, object],
+        search_stage: str,
+        product_head: bool,
+    ) -> str:
+        """Infer a more specific SERP role than the broad lane."""
+        page_type = str(catalog_context.get("page_type") or "")
+
+        if any(term in text for term in self.SUPPLIER_ROLE_TERMS):
+            return "supplier_evaluation"
+        if page_type == "wholesale_faq" or any(term in text for term in self.PROCUREMENT_FAQ_TERMS):
+            return "procurement_faq"
+        if any(term in text for term in self.MATERIAL_COMPARISON_TERMS):
+            return "material_comparison"
+        if any(term in text for term in self.PROBLEM_RISK_TERMS):
+            return "problem_risk"
+        if any(term in text for term in self.APPLICATION_FIT_TERMS):
+            return "application_fit"
+        if any(term in text for term in self.SPEC_SELECTION_TERMS):
+            return "spec_selection"
+        if product_head and search_stage == "decision":
+            return "supplier_evaluation"
+        return "application_fit" if search_stage != "decision" else "procurement_faq"
 
     def _extract_primary_subject(self, keyword: str) -> str:
         """Extract the most likely product or material phrase."""

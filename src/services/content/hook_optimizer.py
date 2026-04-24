@@ -434,6 +434,7 @@ class HookOptimizer:
         decision_questions = catalog_context.get("decision_questions") or []
         content_lane = catalog_context.get("content_lane", "procurement_conversion")
         search_stage = catalog_context.get("search_stage")
+        serp_role = catalog_context.get("serp_role")
 
         subject = self._keyword_title(topic.title)
         category_title = self._keyword_title(primary_target) if primary_target else None
@@ -449,6 +450,7 @@ class HookOptimizer:
             content_lane,
             search_stage,
             topic.title,
+            serp_role,
         )
 
         if page_type == "wholesale_faq":
@@ -471,7 +473,12 @@ class HookOptimizer:
 
         if page_type == "category_support":
             focus = hook_tail
-            if category_title and category_title.lower() not in subject.lower():
+            category_subject_score = (
+                self.title_matcher.calculate_match_score(category_title, topic.title)
+                if category_title
+                else 0.0
+            )
+            if category_title and category_title.lower() not in subject.lower() and category_subject_score >= 0.6:
                 title = f"{category_title}: {focus}"
             else:
                 title = f"{subject}: {focus}"
@@ -494,6 +501,7 @@ class HookOptimizer:
         content_lane: str,
         search_stage: Optional[str],
         topic_title: str,
+        serp_role: Optional[str],
     ) -> str:
         """Choose a hook-sensitive tail for catalog-backed titles."""
         procurement_defaults = {
@@ -572,6 +580,7 @@ class HookOptimizer:
                 buyer_angle=buyer_angle,
                 spec_terms=spec_terms,
                 defaults=procurement_defaults,
+                serp_role=serp_role,
             )
         return self._traffic_tail_for_hook(
             hook_type=hook_type,
@@ -580,6 +589,7 @@ class HookOptimizer:
             defaults=traffic_defaults,
             search_stage=search_stage,
             topic_title=topic_title,
+            serp_role=serp_role,
         )
 
     def _procurement_tail_for_hook(
@@ -589,8 +599,23 @@ class HookOptimizer:
         buyer_angle: Optional[str],
         spec_terms: Optional[str],
         defaults: Dict[str, Dict[HookType, str]],
+        serp_role: Optional[str],
     ) -> str:
         page_defaults = defaults.get(page_type or "", {})
+        role_defaults = {
+            "supplier_evaluation": {
+                HookType.DATA: "Supplier Fit, Quote Checks, and Audit Signals",
+                HookType.PROBLEM: "Supplier Risks, Red Flags, and Audit Gaps",
+                HookType.HOW_TO: "Supplier Shortlisting, Quote Review, and Audit Steps",
+                HookType.QUESTION: "Which Supplier Checks, Quote Terms, and Audit Questions Matter?",
+            },
+            "procurement_faq": {
+                HookType.DATA: "MOQ, Lead Time, and Buying Questions",
+                HookType.PROBLEM: "MOQ Gaps, Sample Risks, and Shipping Delays",
+                HookType.HOW_TO: "MOQ Checks, Sample Steps, and Procurement Criteria",
+                HookType.QUESTION: "Which MOQ, Lead-Time, and Sampling Questions Matter?",
+            },
+        }
         base = buyer_angle or spec_terms
         if base:
             base_lower = base.lower()
@@ -613,6 +638,8 @@ class HookOptimizer:
                 HookType.CONTROVERSY: "Hidden Tradeoffs",
             }
             return f"{base} and {mappings.get(hook_type, 'Buyer Criteria')}"
+        if serp_role in role_defaults:
+            return role_defaults[serp_role].get(hook_type, "Supplier Fit, Quote Checks, and Buying Criteria")
         return page_defaults.get(hook_type, "Supplier Fit, Quote Checks, and Buying Criteria")
 
     def _traffic_tail_for_hook(
@@ -623,7 +650,36 @@ class HookOptimizer:
         defaults: Dict[str, Dict[HookType, str]],
         search_stage: Optional[str],
         topic_title: str,
+        serp_role: Optional[str],
     ) -> str:
+        role_defaults = {
+            "material_comparison": {
+                HookType.DATA: "Material Tradeoffs, Formula Fit, and Selection Signals",
+                HookType.PROBLEM: "Material Risks, Compatibility Gaps, and Better Options",
+                HookType.HOW_TO: "Material Comparison, Compatibility, and Selection Logic",
+                HookType.QUESTION: "Which Material Fits Stability, Feel, and Packaging Needs?",
+            },
+            "application_fit": {
+                HookType.DATA: "Application Fit, Material Choice, and Selection Signals",
+                HookType.PROBLEM: "Use-Case Risks, Fit Gaps, and Better Options",
+                HookType.HOW_TO: "Application Fit, Use Cases, and Selection Logic",
+                HookType.QUESTION: "Which Option Fits the Formula, Usage, and Packaging Goal?",
+            },
+            "spec_selection": {
+                HookType.DATA: "Capacity, Closure Fit, and Selection Signals",
+                HookType.PROBLEM: "Spec Mismatch Risks, Fit Gaps, and Better Options",
+                HookType.HOW_TO: "Spec Selection, Capacity Fit, and Closure Logic",
+                HookType.QUESTION: "Which Specs Fit Capacity, Closure, and Usage Needs?",
+            },
+            "problem_risk": {
+                HookType.DATA: "Failure Risks, Fit Gaps, and Decision Signals",
+                HookType.PROBLEM: "Leak Risks, Mismatch Problems, and Better Choices",
+                HookType.HOW_TO: "Risk Checks, Mismatch Prevention, and Selection Logic",
+                HookType.QUESTION: "Which Risks Matter Before You Shortlist This Option?",
+            },
+        }
+        if serp_role in role_defaults:
+            return role_defaults[serp_role].get(hook_type, "Application Fit, Material Choice, and Selection Logic")
         page_defaults = defaults.get(page_type or "", {})
         search_angle = self._derive_search_angle(topic_title, spec_terms, page_type, search_stage)
         if search_angle:
@@ -946,6 +1002,7 @@ class HookOptimizer:
         strategy: str = "ctr",  # "ctr", "balanced", "experimental"
         target_keyword: str = None,
         content_lane: Optional[str] = None,
+        serp_role: Optional[str] = None,
     ) -> OptimizedTitle:
         """
         Select the best title based on strategy
@@ -955,6 +1012,7 @@ class HookOptimizer:
             strategy: Selection strategy (ctr, balanced, experimental)
             target_keyword: Optional keyword to match against
             content_lane: Optional lane hint (traffic_entry / procurement_conversion)
+            serp_role: Optional SERP role hint for strict fallback generation
 
         Returns:
             The selected OptimizedTitle
@@ -985,7 +1043,10 @@ class HookOptimizer:
         eligible_variants = [
             item for item in scored_variants
             if item[2] >= self.MIN_ACCEPTABLE_MATCH
-        ] or scored_variants
+        ]
+        if not eligible_variants and target_keyword:
+            return self._build_strict_fallback_variant(target_keyword, content_lane, serp_role)
+        eligible_variants = eligible_variants or scored_variants
 
         if strategy == "ctr":
             # Pure CTR optimization
@@ -1027,3 +1088,37 @@ class HookOptimizer:
 
         hits = sum(1 for term in terms if term in title_lower)
         return min(1.0, hits / 4)
+
+    def _build_strict_fallback_variant(
+        self,
+        target_keyword: str,
+        content_lane: Optional[str],
+        serp_role: Optional[str],
+    ) -> OptimizedTitle:
+        """Use a strict query-preserving fallback when all variants mismatch the keyword."""
+        keyword_title = self._keyword_title(target_keyword)
+        procurement_titles = {
+            "supplier_evaluation": f"{keyword_title}: Supplier Fit, Samples, and Quote Criteria",
+            "procurement_faq": f"{keyword_title}: MOQ, Lead Time, and Buying Questions",
+        }
+        traffic_titles = {
+            "material_comparison": f"{keyword_title}: Tradeoffs, Fit, and Selection Criteria",
+            "application_fit": f"{keyword_title}: Application Fit, Use Cases, and Selection Logic",
+            "spec_selection": f"{keyword_title}: Specs, Compatibility, and Selection Criteria",
+            "problem_risk": f"{keyword_title}: Risks, Mismatches, and Better Choices",
+        }
+
+        if content_lane == "procurement_conversion":
+            title = procurement_titles.get(serp_role or "", f"{keyword_title}: Supplier Evaluation and Buying Criteria")
+            hook_type = HookType.DATA
+        else:
+            title = traffic_titles.get(serp_role or "", f"{keyword_title}: Application Fit and Selection Criteria")
+            hook_type = HookType.HOW_TO
+
+        return OptimizedTitle(
+            title=self._finalize_title(title, target_keyword),
+            hook_type=hook_type,
+            expected_ctr=0.035,
+            rationale="Strict query-preserving fallback because generated variants did not match the target keyword closely enough.",
+            test_variant="Z",
+        )

@@ -120,12 +120,13 @@ class ContentPlannerService:
             if ctx.content_lane
             else ""
         )
+        role_note = f"SERP role: {ctx.serp_role}." if ctx.serp_role else ""
         catalog_note = (
             f"Primary taxonomy: {ctx.primary_taxonomy_name} ({ctx.primary_taxonomy_type})"
             if ctx.primary_taxonomy_name
             else ""
         )
-        lane_guidance = self._build_lane_guidance(ctx.content_lane)
+        lane_guidance = self._build_lane_guidance(ctx.content_lane, ctx.serp_role)
 
         return (
             f"{self.SYSTEM_PROMPT}\n\n"
@@ -133,22 +134,31 @@ class ContentPlannerService:
             f"Target keyword: {keyword}\n"
             f"{page_type_note}\n"
             f"{lane_note}\n"
+            f"{role_note}\n"
             f"{catalog_note}\n\n"
             f"{lane_guidance}\n\n"
             f"Content type signals:\n{type_hints}\n\n"
             f"Generate 4–6 outline sections appropriate for this article's intent."
         )
 
-    def _build_lane_guidance(self, content_lane: Optional[str]) -> str:
+    def _build_lane_guidance(self, content_lane: Optional[str], serp_role: Optional[str]) -> str:
         """Give the planner role-specific structure constraints before outline selection."""
+        role_guidance = {
+            "application_fit": "Prioritize application scenarios, use-case mapping, and suitability criteria.",
+            "material_comparison": "Prioritize side-by-side trade-offs, compatibility, and scenario-specific recommendations.",
+            "spec_selection": "Prioritize spec thresholds, closure/material/capacity criteria, and decision checkpoints.",
+            "supplier_evaluation": "Prioritize supplier qualification, shortlist logic, quote comparison, and audit criteria.",
+            "procurement_faq": "Prioritize direct buyer questions around MOQ, lead time, sampling, customization, QC, and shipping.",
+            "problem_risk": "Prioritize mistakes, risks, mismatch scenarios, and failure-prevention guidance.",
+        }.get(serp_role or "", "Keep the outline tightly aligned to the actual search job behind the keyword.")
         if content_lane == "traffic_entry":
             return (
                 "Lane guidance: This page is a search-entry page. Open from scenario, comparison, "
                 "application fit, or risk framing. Avoid encyclopedia tone and avoid defaulting to "
-                "MOQ/lead-time-first structure unless the query explicitly demands it."
+                f"MOQ/lead-time-first structure unless the query explicitly demands it. {role_guidance}"
             )
         return (
             "Lane guidance: This page is a procurement-conversion page. Open from buyer decision stakes, "
             "supplier qualification, MOQ/cost drivers, sample/QC process, or quotation variables. "
-            "Keep the content commercially useful rather than generic."
+            f"Keep the content commercially useful rather than generic. {role_guidance}"
         )

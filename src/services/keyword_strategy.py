@@ -66,6 +66,10 @@ class KeywordCandidate:
     commercial_facts: List[str] = field(default_factory=list)
     commercial_score: float = 0.0
     routing_score: float = 0.0
+    keyword_quality_score: float = 0.0
+    keyword_publishable: bool = True
+    keyword_rejection_reason: Optional[str] = None
+    serp_role: Optional[str] = None
     required_sections: List[str] = field(default_factory=list)
     # Real data from API (optional, populated when API is available)
     search_volume: Optional[int] = None
@@ -96,6 +100,15 @@ class ContentAwareKeywordGenerator:
     )
     CAPACITY_PATTERN = re.compile(r"\b(\d+(?:\.\d+)?)\s*(ml|l|oz|g)\b", re.IGNORECASE)
     DESCRIPTOR_DROP_TERMS = {"empty", "wholesale", "container", "containers"}
+    BANNED_QUERY_PATTERNS = (
+        r"\bexplained\b",
+        r"\bfor beginners\b",
+        r"\bunderstanding\b",
+        r"\bwhat is\b",
+        r"\bcomplete guide\b",
+        r"\bthe guide\b",
+    )
+    QUERY_NOISE_TERMS = {"quality", "understanding", "explained", "beginners", "guide", "basics"}
 
     def set_website_profile(self, profile):
         """Update website profile"""
@@ -151,6 +164,7 @@ class ContentAwareKeywordGenerator:
             keywords.extend(stage_keywords)
 
         keywords = self._deduplicate_candidates(keywords)
+        keywords = [candidate for candidate in keywords if candidate.keyword_publishable]
 
         # Enrich with real search volume data from API
         keywords = self._enrich_with_api_data(keywords)
@@ -392,6 +406,7 @@ class ContentAwareKeywordGenerator:
         )
         route_target_type, route_target_name, route_target_url = self._infer_route_target(keyword, catalog_match)
         routing_score = self._score_routing_priority(catalog_match, route_target_type, keyword)
+        assessment = self._assess_keyword_publishability(keyword, catalog_match)
 
         return KeywordCandidate(
             keyword=keyword,
@@ -421,8 +436,107 @@ class ContentAwareKeywordGenerator:
             commercial_facts=catalog_match.commercial_facts,
             commercial_score=round(commercial_score, 2),
             routing_score=round(routing_score, 2),
+            keyword_quality_score=assessment["score"],
+            keyword_publishable=assessment["publishable"],
+            keyword_rejection_reason=assessment["reason"],
+            serp_role=assessment["serp_role"],
             required_sections=self._default_required_sections(catalog_match.page_type),
         )
+
+    def _assess_keyword_publishability(self, keyword: str, catalog_match) -> Dict[str, Any]:
+        """Block generic, templated, or non-search-worthy queries before they enter title generation."""
+        normalized = re.sub(r"\s+", " ", (keyword or "").strip().lower())
+        score = 0.45
+        reasons: List[str] = []
+
+        if not normalized:
+            return {"score": 0.0, "publishable": False, "reason": "empty keyword", "serp_role": None}
+
+        if any(re.search(pattern, normalized) for pattern in self.BANNED_QUERY_PATTERNS):
+            return {
+                "score": 0.1,
+                "publishable": False,
+                "reason": "generic template phrasing",
+                "serp_role": None,
+            }
+
+        tokens = [token for token in re.findall(r"[a-z0-9]+", normalized) if token]
+        product_match = self.PRODUCT_TERM_PATTERN.search(normalized)
+        has_catalog_support = bool(
+            getattr(catalog_match, "supporting_products", None)
+            or getattr(catalog_match, "target_category_name", None)
+            or getattr(catalog_match, "target_tag_name", None)
+        )
+        has_capacity = bool(self.CAPACITY_PATTERN.search(normalized))
+        commercial_terms = {"supplier", "manufacturer", "wholesale", "moq", "quote", "sample", "audit", "lead", "custom"}
+        research_terms = {"compare", "comparison", "vs", "versus", "application", "material", "fit", "compatibility", "choose", "selection", "risk"}
+        commercial_hits = sum(1 for token in commercial_terms if token in normalized)
+        research_hits = sum(1 for token in research_terms if token in normalized)
+
+        if product_match:
+            score += 0.22
+            reasons.append("product_entity")
+        if has_catalog_support:
+            score += 0.12
+            reasons.append("catalog_support")
+        if has_capacity:
+            score += 0.06
+        if commercial_hits:
+            score += min(0.16, commercial_hits * 0.05)
+        if research_hits:
+            score += min(0.16, research_hits * 0.05)
+        if len(tokens) >= 4:
+            score += 0.05
+
+        noise_hits = [token for token in tokens if token in self.QUERY_NOISE_TERMS]
+        if noise_hits and not (product_match and (commercial_hits or research_hits)):
+            score -= 0.28
+            reasons.append("generic_noise_tokens")
+
+        if re.search(r"\b(?:white|black|clear|quality)\s+(?:pump|cap|lid)\b", normalized) and not product_match:
+            return {
+                "score": 0.12,
+                "publishable": False,
+                "reason": "attribute fragment instead of publishable topic",
+                "serp_role": None,
+            }
+
+        if "packaging" in normalized and not (product_match or commercial_hits or research_hits):
+            score -= 0.18
+
+        if len(tokens) < 3 or (not product_match and commercial_hits == 0 and research_hits == 0):
+            return {
+                "score": round(max(0.0, score - 0.2), 2),
+                "publishable": False,
+                "reason": "query lacks a publishable search intent",
+                "serp_role": None,
+            }
+
+        serp_role = None
+        try:
+            from src.services.content.intent_analyzer import SearchIntentAnalyzer
+
+            route_signal = SearchIntentAnalyzer().route_content_lane(
+                keyword,
+                catalog_context={
+                    "page_type": getattr(catalog_match, "page_type", None),
+                    "target_category_name": getattr(catalog_match, "target_category_name", None),
+                    "target_tag_name": getattr(catalog_match, "target_tag_name", None),
+                    "primary_taxonomy_name": getattr(catalog_match, "primary_taxonomy_name", None),
+                    "supporting_products": getattr(catalog_match, "supporting_products", []),
+                },
+            )
+            serp_role = route_signal.serp_role
+        except Exception:
+            serp_role = None
+
+        publishable = score >= 0.58
+        return {
+            "score": round(max(0.0, min(score, 1.0)), 2),
+            "publishable": publishable,
+            "reason": None if publishable else "keyword quality below publish threshold",
+            "serp_role": serp_role,
+        }
 
     def _infer_route_target(self, keyword: str, catalog_match) -> tuple[Optional[str], Optional[str], Optional[str]]:
         """Pick the most natural landing page for the article CTA path."""
@@ -715,18 +829,14 @@ class ContentAwareKeywordGenerator:
 
         # Extract product categories from profile
         categories = profile.product_categories[:5] if profile.product_categories else ["packaging"]
-        themes = profile.content_themes[:3] if profile.content_themes else ["quality"]
-
         # Awareness templates (problem-focused)
         awareness_templates = [
-            "how to choose {category}",
-            "what is {category}",
-            "benefits of {category}",
-            "{category} guide",
-            "understanding {category}",
-            "{theme} {category} explained",
-            "why {category} matters",
-            "{category} for beginners"
+            "{category} material selection",
+            "{category} application fit",
+            "when to use {category}",
+            "{category} selection mistakes to avoid",
+            "{category} compatibility and fit",
+            "{category} for specific product applications",
         ]
 
         for template in awareness_templates:
@@ -738,10 +848,6 @@ class ContentAwareKeywordGenerator:
                     break
 
                 keyword = template.replace("{category}", category)
-
-                # Add theme variation
-                if "{theme}" in template and themes:
-                    keyword = keyword.replace("{theme}", themes[0])
 
                 keywords.append(self._build_candidate(
                     keyword=keyword,
@@ -770,14 +876,12 @@ class ContentAwareKeywordGenerator:
 
         # Consideration templates (solution-focused)
         consideration_templates = [
-            "types of {category}",
-            "{category} options",
+            "{category} material options",
             "{category} comparison",
-            "{industry_term} {category}",
             "{category} for {industry_term}",
-            "choosing {category} supplier",
-            "{category} materials",
-            "{category} features"
+            "{category} supplier comparison",
+            "{category} materials and closures",
+            "{category} for formulation fit"
         ]
 
         for template in consideration_templates:
@@ -821,14 +925,14 @@ class ContentAwareKeywordGenerator:
 
         # Decision templates (product-focused)
         decision_templates = [
-            "best {category} supplier",
+            "{category} supplier evaluation",
             "{category} manufacturer",
-            "buy {category} wholesale",
-            "{category} bulk order",
-            "custom {category}",
+            "{category} wholesale quote",
+            "{category} MOQ and lead time",
+            "custom {category} supplier",
             "{industry_term} {category} supplier",
-            "{category} with logo",
-            "affordable {category}"
+            "{category} sampling and customization",
+            "{category} procurement checklist"
         ]
 
         for template in decision_templates:

@@ -144,7 +144,7 @@ async def _generate_emergency_topic(website_profile=None) -> str:
             "Optimizing {process} for Maximum ROI: A Case Study",
             "Why Traditional {practice} Methods Are Costing You Money",
             "How Industry Leaders Are Transforming {topic}",
-            "The Complete Guide to {solution} in {year}",
+            "{solution}: Implementation Risks, Tradeoffs, and Planning Priorities for {year}",
             "Addressing the {pain_point} Crisis in Manufacturing"
         ],
         "logistics": [
@@ -246,7 +246,7 @@ async def _generate_emergency_topic(website_profile=None) -> str:
         topic = template.format(**variables)
     except KeyError:
         # Fallback if template has missing variables
-        topic = f"Strategic Guide to {variables['topic'].title()} in {variables['year']}"
+        topic = f"{variables['topic'].title()}: Strategy, Tradeoffs, and Execution Priorities in {variables['year']}"
     
     logger.info(f"Generated emergency topic: {topic}")
     return topic
@@ -313,6 +313,10 @@ def _apply_catalog_context_to_seo_context(seo_context, catalog_context: Dict[str
     seo_context.content_lane_confidence = catalog_context.get("content_lane_confidence")
     seo_context.content_lane_signals = catalog_context.get("content_lane_signals", {})
     seo_context.search_stage = catalog_context.get("search_stage") or seo_context.search_stage
+    seo_context.serp_role = catalog_context.get("serp_role") or seo_context.serp_role
+    seo_context.keyword_quality_score = catalog_context.get("keyword_quality_score", seo_context.keyword_quality_score)
+    seo_context.keyword_publishable = catalog_context.get("keyword_publishable", seo_context.keyword_publishable)
+    seo_context.keyword_rejection_reason = catalog_context.get("keyword_rejection_reason") or seo_context.keyword_rejection_reason
 
     if seo_context.supporting_tags:
         seo_context.tags = list(dict.fromkeys(seo_context.tags + seo_context.supporting_tags[:6]))
@@ -333,14 +337,52 @@ def _route_catalog_context(keyword: str, catalog_context: Dict[str, Any]) -> Dic
             "reasons": route_signal.reasons,
         }
         enriched_context["search_stage"] = route_signal.search_stage
+        enriched_context["serp_role"] = route_signal.serp_role
     except Exception as exc:
         logger.debug(f"Content lane routing failed for '{keyword}': {exc}")
         enriched_context.setdefault("content_lane", "procurement_conversion")
         enriched_context.setdefault("content_lane_confidence", 0.55)
         enriched_context.setdefault("content_lane_signals", {"scores": {}, "reasons": ["routing_fallback"]})
         enriched_context.setdefault("search_stage", "decision")
+        enriched_context.setdefault("serp_role", "procurement_faq")
 
     return enriched_context
+
+
+def _assess_keyword_publishability(keyword: str, website_profile, catalog_context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Evaluate whether a keyword deserves publication before title generation."""
+    try:
+        from src.services.keyword_strategy import ContentAwareKeywordGenerator
+
+        matcher = ContentAwareKeywordGenerator(website_profile)
+
+        class _CatalogMatchShim:
+            def __init__(self, context: Dict[str, Any]):
+                self.page_type = context.get("page_type")
+                self.target_category_name = context.get("target_category_name")
+                self.target_tag_name = context.get("target_tag_name")
+                self.primary_taxonomy_name = context.get("primary_taxonomy_name")
+                self.supporting_products = context.get("supporting_products", [])
+
+        return matcher._assess_keyword_publishability(keyword, _CatalogMatchShim(catalog_context or {}))
+    except Exception as exc:
+        logger.debug(f"Keyword publishability assessment failed for '{keyword}': {exc}")
+        return {"score": 0.6, "publishable": True, "reason": None, "serp_role": None}
+
+
+def _hook_type_for_serp_role(serp_role: Optional[str]):
+    """Map SERP role to the most appropriate title hook family."""
+    from src.models.content_intelligence import HookType
+
+    mapping = {
+        "supplier_evaluation": HookType.DATA,
+        "procurement_faq": HookType.QUESTION,
+        "material_comparison": HookType.DATA,
+        "application_fit": HookType.HOW_TO,
+        "spec_selection": HookType.HOW_TO,
+        "problem_risk": HookType.PROBLEM,
+    }
+    return mapping.get(serp_role or "", HookType.HOW_TO)
 
 
 def _add_catalog_links(seo_context) -> None:
@@ -766,9 +808,16 @@ def _select_best_content_candidate(candidates: list, db=None):
     if not candidates:
         return None
 
+    publishable_candidates = [
+        candidate for candidate in candidates
+        if getattr(candidate, "keyword_publishable", True)
+    ]
+    selection_pool = publishable_candidates or candidates
+
     ranked = sorted(
-        candidates,
+        selection_pool,
         key=lambda candidate: (
+            getattr(candidate, "keyword_quality_score", 0),
             getattr(candidate, "routing_score", 0),
             getattr(candidate, "commercial_score", 0),
             1 if getattr(candidate, "is_long_tail", False) else 0,
@@ -1216,6 +1265,22 @@ async def content_generation_job(data: Dict[str, Any]) -> Dict[str, Any]:
                     if opp.query.lower() not in used_keyword_set:
                         target_keyword = opp.query
                         gsc_catalog_context = _route_catalog_context(target_keyword, gsc_catalog_context)
+                        quality_assessment = _assess_keyword_publishability(
+                            target_keyword,
+                            website_profile if 'website_profile' in locals() else None,
+                            gsc_catalog_context,
+                        )
+                        if not quality_assessment.get("publishable", True):
+                            logger.info(
+                                f"Skipping non-publishable GSC keyword '{target_keyword}': {quality_assessment.get('reason')}"
+                            )
+                            target_keyword = None
+                            continue
+                        gsc_catalog_context["keyword_quality_score"] = quality_assessment.get("score")
+                        gsc_catalog_context["keyword_publishable"] = quality_assessment.get("publishable")
+                        gsc_catalog_context["keyword_rejection_reason"] = quality_assessment.get("reason")
+                        if quality_assessment.get("serp_role"):
+                            gsc_catalog_context["serp_role"] = quality_assessment.get("serp_role")
                         target_context = {
                             "source": "GSC (Optimization)",
                             "metric": f"Pos: {opp.position}, Impr: {opp.impressions}, RouteScore: {round(_score_catalog_context_for_selection(opp.query, gsc_catalog_context), 2)}"
@@ -1230,8 +1295,8 @@ async def content_generation_job(data: Dict[str, Any]) -> Dict[str, Any]:
                         # Create temporary topic for title optimization
                         temp_topic = ContentTopic(
                             title=target_keyword,
-                            angle=f"comprehensive guide to {target_keyword}",
-                            hook_type=HookType.HOW_TO,
+                            angle=f"search demand analysis for {target_keyword}",
+                            hook_type=_hook_type_for_serp_role(gsc_catalog_context.get("serp_role")),
                             industry=website_profile.business_type if 'website_profile' in locals() and website_profile else "packaging",
                             target_audience=website_profile.target_audience if 'website_profile' in locals() and website_profile else "b2b_buyers",
                             business_intent=0.7,
@@ -1253,6 +1318,7 @@ async def content_generation_job(data: Dict[str, Any]) -> Dict[str, Any]:
                                 strategy="balanced",
                                 target_keyword=target_keyword,
                                 content_lane=gsc_catalog_context.get("content_lane"),
+                                serp_role=gsc_catalog_context.get("serp_role"),
                             )
                             selected_title = best_title.title
                             logger.info(f"Generated optimized title for GSC keyword: {selected_title}")
@@ -1345,8 +1411,8 @@ async def content_generation_job(data: Dict[str, Any]) -> Dict[str, Any]:
                         # Create temporary topic for title optimization
                         temp_topic = ContentTopic(
                             title=target_keyword,
-                            angle=f"comprehensive guide to {target_keyword}",
-                            hook_type=HookType.HOW_TO,
+                            angle=f"search demand analysis for {target_keyword}",
+                            hook_type=_hook_type_for_serp_role(content_aware_catalog_context.get("serp_role")),
                             industry=website_profile.business_type if website_profile else "packaging",
                             target_audience=website_profile.target_audience if website_profile else "b2b_buyers",
                             business_intent=0.7,
@@ -1377,44 +1443,62 @@ async def content_generation_job(data: Dict[str, Any]) -> Dict[str, Any]:
                             target_keyword,
                             content_aware_catalog_context,
                         )
-                        
-                        # Generate optimized titles
-                        optimized_titles = await hook_optimizer.generate_optimized_titles(
-                            temp_topic,
-                            count=5,
-                            catalog_context=content_aware_catalog_context,
+                        quality_assessment = _assess_keyword_publishability(
+                            target_keyword,
+                            website_profile,
+                            content_aware_catalog_context,
                         )
-                        if optimized_titles:
-                            best_title = await hook_optimizer.select_best_title(
-                                optimized_titles,
-                                strategy="balanced",
-                                target_keyword=target_keyword,
-                                content_lane=content_aware_catalog_context.get("content_lane"),
+                        if not quality_assessment.get("publishable", True):
+                            logger.info(
+                                f"Skipping non-publishable content-aware keyword '{target_keyword}': {quality_assessment.get('reason')}"
                             )
-                            selected_title = best_title.title
-                            logger.info(f"Generated optimized title for Content-Aware keyword: {selected_title}")
+                            target_keyword = None
+                            seo_context = None
                         else:
-                            selected_title = target_keyword
-                        
-                        # Create SEOContext for Content-Aware keyword with optimized title
-                        seo_context = SEOContext(
-                            content_id=f"ca_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{target_keyword[:30]}",
-                            source="ContentAware",
-                            industry=website_profile.business_type if website_profile else "general",
-                            target_audience=website_profile.target_audience if website_profile else "b2b",
-                            target_keyword=target_keyword,
-                            topic_title=target_keyword,
-                            selected_title=selected_title,
-                            optimized_titles=optimized_titles,
-                            selected_title_variant=best_title.test_variant if optimized_titles else "A",
-                            title_hook_type=best_title.hook_type if optimized_titles else HookType.HOW_TO,
-                            title_ctr_estimate=best_title.expected_ctr if optimized_titles else 0.04,
-                            status=SEOElementStatus.GENERATED
-                        )
-                        _apply_catalog_context_to_seo_context(
-                            seo_context,
-                            content_aware_catalog_context
-                        )
+                            content_aware_catalog_context["keyword_quality_score"] = quality_assessment.get("score")
+                            content_aware_catalog_context["keyword_publishable"] = quality_assessment.get("publishable")
+                            content_aware_catalog_context["keyword_rejection_reason"] = quality_assessment.get("reason")
+                            if quality_assessment.get("serp_role"):
+                                content_aware_catalog_context["serp_role"] = quality_assessment.get("serp_role")
+                            
+                            # Generate optimized titles
+                            optimized_titles = await hook_optimizer.generate_optimized_titles(
+                                temp_topic,
+                                count=5,
+                                catalog_context=content_aware_catalog_context,
+                            )
+                            if optimized_titles:
+                                best_title = await hook_optimizer.select_best_title(
+                                    optimized_titles,
+                                    strategy="balanced",
+                                    target_keyword=target_keyword,
+                                    content_lane=content_aware_catalog_context.get("content_lane"),
+                                    serp_role=content_aware_catalog_context.get("serp_role"),
+                                )
+                                selected_title = best_title.title
+                                logger.info(f"Generated optimized title for Content-Aware keyword: {selected_title}")
+                            else:
+                                selected_title = target_keyword
+                            
+                            # Create SEOContext for Content-Aware keyword with optimized title
+                            seo_context = SEOContext(
+                                content_id=f"ca_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{target_keyword[:30]}",
+                                source="ContentAware",
+                                industry=website_profile.business_type if website_profile else "general",
+                                target_audience=website_profile.target_audience if website_profile else "b2b",
+                                target_keyword=target_keyword,
+                                topic_title=target_keyword,
+                                selected_title=selected_title,
+                                optimized_titles=optimized_titles,
+                                selected_title_variant=best_title.test_variant if optimized_titles else "A",
+                                title_hook_type=best_title.hook_type if optimized_titles else HookType.HOW_TO,
+                                title_ctr_estimate=best_title.expected_ctr if optimized_titles else 0.04,
+                                status=SEOElementStatus.GENERATED
+                            )
+                            _apply_catalog_context_to_seo_context(
+                                seo_context,
+                                content_aware_catalog_context
+                            )
             except Exception as e:
                 logger.warning(f"Content-aware keyword generation failed: {e}")
 
@@ -1463,6 +1547,22 @@ async def content_generation_job(data: Dict[str, Any]) -> Dict[str, Any]:
                     if kw.keyword.lower() not in used_keyword_set:
                         target_keyword = kw.keyword
                         api_catalog_context = _route_catalog_context(target_keyword, api_catalog_context)
+                        quality_assessment = _assess_keyword_publishability(
+                            target_keyword,
+                            website_profile if 'website_profile' in locals() else None,
+                            api_catalog_context,
+                        )
+                        if not quality_assessment.get("publishable", True):
+                            logger.info(
+                                f"Skipping non-publishable Keyword API keyword '{target_keyword}': {quality_assessment.get('reason')}"
+                            )
+                            target_keyword = None
+                            continue
+                        api_catalog_context["keyword_quality_score"] = quality_assessment.get("score")
+                        api_catalog_context["keyword_publishable"] = quality_assessment.get("publishable")
+                        api_catalog_context["keyword_rejection_reason"] = quality_assessment.get("reason")
+                        if quality_assessment.get("serp_role"):
+                            api_catalog_context["serp_role"] = quality_assessment.get("serp_role")
                         target_context = {
                             "source": "KeywordAPI (Expansion)",
                             "metric": (
@@ -1482,8 +1582,8 @@ async def content_generation_job(data: Dict[str, Any]) -> Dict[str, Any]:
                             # Create temporary topic for title optimization
                             temp_topic = ContentTopic(
                                 title=target_keyword,
-                                angle=f"comprehensive guide to {target_keyword}",
-                                hook_type=HookType.HOW_TO,
+                                angle=f"search demand analysis for {target_keyword}",
+                                hook_type=_hook_type_for_serp_role(api_catalog_context.get("serp_role")),
                                 industry=website_profile.business_type if 'website_profile' in locals() and website_profile else "packaging",
                                 target_audience=website_profile.target_audience if 'website_profile' in locals() and website_profile else "b2b_buyers",
                                 business_intent=0.7,
@@ -1505,6 +1605,7 @@ async def content_generation_job(data: Dict[str, Any]) -> Dict[str, Any]:
                                     strategy="balanced",
                                     target_keyword=target_keyword,
                                     content_lane=api_catalog_context.get("content_lane"),
+                                    serp_role=api_catalog_context.get("serp_role"),
                                 )
                                 selected_title = best_title.title
                                 logger.info(f"Generated optimized title for Keyword API keyword: {selected_title}")
@@ -1589,64 +1690,81 @@ async def content_generation_job(data: Dict[str, Any]) -> Dict[str, Any]:
                         target_keyword = topic.title
                         ci_catalog_context = _match_catalog_context(topic.title, website_profile)
                         ci_catalog_context = _route_catalog_context(target_keyword, ci_catalog_context)
-
-                        # Generate optimized title variants using HookOptimizer
-                        logger.info(f"Generating optimized title variants for: {topic.title}")
-                        optimized_titles = await hook_optimizer.generate_optimized_titles(
-                            topic,
-                            count=5,
-                            catalog_context=ci_catalog_context,
+                        quality_assessment = _assess_keyword_publishability(
+                            target_keyword,
+                            website_profile,
+                            ci_catalog_context,
                         )
+                        if not quality_assessment.get("publishable", True):
+                            logger.info(
+                                f"Skipping non-publishable intelligence topic '{target_keyword}': {quality_assessment.get('reason')}"
+                            )
+                            target_keyword = None
+                        else:
+                            ci_catalog_context["keyword_quality_score"] = quality_assessment.get("score")
+                            ci_catalog_context["keyword_publishable"] = quality_assessment.get("publishable")
+                            ci_catalog_context["keyword_rejection_reason"] = quality_assessment.get("reason")
+                            if quality_assessment.get("serp_role"):
+                                ci_catalog_context["serp_role"] = quality_assessment.get("serp_role")
 
-                        # Select best title based on CTR strategy
-                        best_title = await hook_optimizer.select_best_title(
-                            optimized_titles,
-                            strategy="balanced",
-                            target_keyword=target_keyword,
-                            content_lane=ci_catalog_context.get("content_lane"),
-                        )
+                            # Generate optimized title variants using HookOptimizer
+                            logger.info(f"Generating optimized title variants for: {topic.title}")
+                            optimized_titles = await hook_optimizer.generate_optimized_titles(
+                                topic,
+                                count=5,
+                                catalog_context=ci_catalog_context,
+                            )
 
-                        # Create unified SEOContext
-                        seo_context = SEOContext(
-                            content_id=f"ci_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{topic.title[:30]}",
-                            source="ContentIntelligence",
-                            industry=industry,
-                            target_audience=audience,
-                            target_keyword=topic.title,  # Use topic title as focus keyword
-                            topic_title=topic.title,
-                            optimized_titles=optimized_titles,
-                            selected_title=best_title.title,
-                            selected_title_variant=best_title.test_variant,
-                            title_hook_type=best_title.hook_type,
-                            title_ctr_estimate=best_title.expected_ctr,
-                            research_result=topic.research_result,
-                            outline=topic.outline,
-                            value_score=topic.value_score,
-                            business_intent=topic.business_intent,
-                            status=SEOElementStatus.GENERATED
-                        )
-                        _apply_catalog_context_to_seo_context(
-                            seo_context,
-                            ci_catalog_context
-                        )
+                            # Select best title based on CTR strategy
+                            best_title = await hook_optimizer.select_best_title(
+                                optimized_titles,
+                                strategy="balanced",
+                                target_keyword=target_keyword,
+                                content_lane=ci_catalog_context.get("content_lane"),
+                                serp_role=ci_catalog_context.get("serp_role"),
+                            )
 
-                        target_context = {
-                            "source": "ContentIntelligence (Research-Based)",
-                            "metric": f"Value Score: {topic.value_score:.2f}, Business Intent: {topic.business_intent:.2f}",
-                            "research_sources": [s.name for s in topic.research_sources],
-                            "selected_title": best_title.title,
-                            "title_variant": best_title.test_variant,
-                            "hook_type": best_title.hook_type.value,
-                            "ctr_estimate": best_title.expected_ctr,
-                            "outline": topic.outline.dict() if topic.outline else None,
-                            "research_result": topic.research_result.dict() if topic.research_result else None,
-                            "optimized_titles_count": len(optimized_titles),
-                            "target_category": seo_context.target_category_name,
-                            "target_tag": seo_context.target_tag_name,
-                            "supporting_products": [p.get("name") for p in seo_context.supporting_products],
-                        }
-                        logger.info(f"Selected research-based topic: {target_keyword}")
-                        logger.info(f"Optimized title: {best_title.title} (CTR: {best_title.expected_ctr:.3f}, Hook: {best_title.hook_type.value})")
+                            # Create unified SEOContext
+                            seo_context = SEOContext(
+                                content_id=f"ci_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{topic.title[:30]}",
+                                source="ContentIntelligence",
+                                industry=industry,
+                                target_audience=audience,
+                                target_keyword=topic.title,  # Use topic title as focus keyword
+                                topic_title=topic.title,
+                                optimized_titles=optimized_titles,
+                                selected_title=best_title.title,
+                                selected_title_variant=best_title.test_variant,
+                                title_hook_type=best_title.hook_type,
+                                title_ctr_estimate=best_title.expected_ctr,
+                                research_result=topic.research_result,
+                                outline=topic.outline,
+                                value_score=topic.value_score,
+                                business_intent=topic.business_intent,
+                                status=SEOElementStatus.GENERATED
+                            )
+                            _apply_catalog_context_to_seo_context(
+                                seo_context,
+                                ci_catalog_context
+                            )
+
+                            target_context = {
+                                "source": "ContentIntelligence (Research-Based)",
+                                "metric": f"Value Score: {topic.value_score:.2f}, Business Intent: {topic.business_intent:.2f}",
+                                "research_sources": [s.name for s in topic.research_sources],
+                                "selected_title": best_title.title,
+                                "title_variant": best_title.test_variant,
+                                "hook_type": best_title.hook_type.value,
+                                "ctr_estimate": best_title.expected_ctr,
+                                "outline": topic.outline.dict() if topic.outline else None,
+                                "research_result": topic.research_result.dict() if topic.research_result else None,
+                                "optimized_titles_count": len(optimized_titles),
+                                "target_category": seo_context.target_category_name,
+                                "target_tag": seo_context.target_tag_name,
+                                "supporting_products": [p.get("name") for p in seo_context.supporting_products],
+                            }
+                            logger.info(f"Selected research-based topic: {target_keyword}")
+                            logger.info(f"Optimized title: {best_title.title} (CTR: {best_title.expected_ctr:.3f}, Hook: {best_title.hook_type.value})")
                 
                 if not target_keyword:
                     logger.warning("Content Intelligence generated no unused topics, falling back to emergency")
@@ -1668,11 +1786,18 @@ async def content_generation_job(data: Dict[str, Any]) -> Dict[str, Any]:
 
                     hook_optimizer = HookOptimizer()
 
+                    emergency_catalog_context = _match_catalog_context(target_keyword, website_profile)
+                    emergency_catalog_context = _route_catalog_context(target_keyword, emergency_catalog_context)
+                    quality_assessment = _assess_keyword_publishability(
+                        target_keyword,
+                        website_profile,
+                        emergency_catalog_context,
+                    )
                     # Create temp topic for title optimization
                     temp_topic = ContentTopic(
                         title=target_keyword,
                         angle=f"emergency fallback for {target_keyword}",
-                        hook_type=HookType.HOW_TO,
+                        hook_type=_hook_type_for_serp_role(emergency_catalog_context.get("serp_role")),
                         industry=website_profile.business_type if website_profile else "packaging",
                         target_audience=website_profile.target_audience if website_profile else "b2b_buyers",
                         business_intent=0.6,
@@ -1682,8 +1807,11 @@ async def content_generation_job(data: Dict[str, Any]) -> Dict[str, Any]:
                         brand_alignment_score=0.6,
                         value_score=0.55
                     )
-                    emergency_catalog_context = _match_catalog_context(target_keyword, website_profile)
-                    emergency_catalog_context = _route_catalog_context(target_keyword, emergency_catalog_context)
+                    emergency_catalog_context["keyword_quality_score"] = quality_assessment.get("score")
+                    emergency_catalog_context["keyword_publishable"] = quality_assessment.get("publishable")
+                    emergency_catalog_context["keyword_rejection_reason"] = quality_assessment.get("reason")
+                    if quality_assessment.get("serp_role"):
+                        emergency_catalog_context["serp_role"] = quality_assessment.get("serp_role")
 
                     # Generate optimized title
                     optimized_titles = await hook_optimizer.generate_optimized_titles(
@@ -1697,6 +1825,7 @@ async def content_generation_job(data: Dict[str, Any]) -> Dict[str, Any]:
                             strategy="balanced",
                             target_keyword=target_keyword,
                             content_lane=emergency_catalog_context.get("content_lane"),
+                            serp_role=emergency_catalog_context.get("serp_role"),
                         )
                         selected_title = best_title.title
                         logger.info(f"Emergency fallback optimized title: {selected_title}")
@@ -2013,6 +2142,7 @@ async def content_generation_job(data: Dict[str, Any]) -> Dict[str, Any]:
             validation = seo_context.validate_synchronization()
             if not validation["valid"]:
                 logger.warning(f"SEO synchronization issues detected: {validation['issues']}")
+                auto_publish = False
             logger.info(f"SEO validation score: {validation['score']}/100")
         
         content = PublishableContent(

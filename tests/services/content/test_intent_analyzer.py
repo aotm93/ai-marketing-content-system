@@ -180,6 +180,7 @@ class TestSearchIntentAnalyzer:
 
         assert route.content_lane == "procurement_conversion"
         assert route.search_stage == "decision"
+        assert route.serp_role in {"supplier_evaluation", "procurement_faq"}
         assert route.confidence >= 0.7
 
     def test_route_comparison_query_to_traffic_entry_lane(self):
@@ -195,4 +196,5 @@ class TestSearchIntentAnalyzer:
 
         assert route.content_lane == "traffic_entry"
         assert route.search_stage == "consideration"
+        assert route.serp_role == "material_comparison"
         assert route.signal_scores["traffic"] > route.signal_scores["commercial"]

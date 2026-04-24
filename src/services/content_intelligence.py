@@ -126,7 +126,7 @@ class TopicGenerator:
         for pain in pain_points[:3]:  # Top 3 pain points
             # High-intent solution topic
             topics.append(ContentTopic(
-                title=f"Solving {pain.category}: A Complete Guide for {context.audience}",
+                title=f"{pain.category}: Root Causes, Decision Risks, and Practical Fixes for {context.audience}",
                 angle=f"practical_solution_{pain.category}",
                 hook_type=HookType.PROBLEM,
                 business_intent=0.85,
@@ -204,7 +204,7 @@ class TopicGenerator:
         
         for gap in gaps[:2]:  # Top 2 gaps
             topics.append(ContentTopic(
-                title=f"{gap.topic}: The Guide {context.audience} Actually Need",
+                title=f"{gap.topic}: What Buyers Need to Compare, Validate, and Decide",
                 angle=f"gap_filling_{gap.gap_type}",
                 hook_type=HookType.CONTROVERSY if gap.gap_type == "angle" else HookType.HOW_TO,
                 differentiation_score=0.90,

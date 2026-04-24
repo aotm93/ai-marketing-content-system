@@ -14,6 +14,7 @@ from src.models.content_intelligence import (
     ContentTopic, ResearchResult, ContentOutline, 
     OptimizedTitle, HookType, ResearchSource
 )
+from src.services.content.title_matcher import TitleQueryMatcher
 
 
 class ArticleContentType(str, Enum):
@@ -111,6 +112,13 @@ class SEOContext(BaseModel):
         default=None,
         description="Normalized search stage inferred for the query, e.g. awareness/consideration/decision."
     )
+    serp_role: Optional[str] = Field(
+        default=None,
+        description="More specific SERP role, e.g. supplier_evaluation, material_comparison, application_fit."
+    )
+    keyword_quality_score: Optional[float] = None
+    keyword_publishable: bool = True
+    keyword_rejection_reason: Optional[str] = None
 
     # ========== Catalog Context ==========
     page_type: str = Field(default="category_support")
@@ -237,6 +245,22 @@ class SEOContext(BaseModel):
                         "message": f"Selected title '{self.selected_title}' differs from topic title '{self.topic_title}' but is not in optimized variants",
                         "severity": "medium"
                     })
+
+        if self.keyword_publishable is False:
+            issues.append({
+                "type": "keyword_not_publishable",
+                "message": f"Target keyword '{self.target_keyword}' is marked as non-publishable: {self.keyword_rejection_reason or 'quality gate'}",
+                "severity": "high"
+            })
+
+        if self.selected_title and self.target_keyword:
+            match_score = TitleQueryMatcher().calculate_match_score(self.selected_title, self.target_keyword)
+            if match_score < 0.45:
+                issues.append({
+                    "type": "title_keyword_mismatch",
+                    "message": f"Selected title '{self.selected_title}' mismatches target keyword '{self.target_keyword}' (match={match_score:.2f})",
+                    "severity": "high"
+                })
         
         # Check 2: Content must use selected title as H1
         if self.content_html and self.selected_title:
@@ -370,6 +394,10 @@ class SEOContext(BaseModel):
             "content_lane_confidence": self.content_lane_confidence,
             "content_lane_signals": self.content_lane_signals,
             "search_stage": self.search_stage,
+            "serp_role": self.serp_role,
+            "keyword_quality_score": self.keyword_quality_score,
+            "keyword_publishable": self.keyword_publishable,
+            "keyword_rejection_reason": self.keyword_rejection_reason,
             "article_content_type": self.article_content_type.value if self.article_content_type else "general",
             "planned_outline": self.planned_outline or [],
         }

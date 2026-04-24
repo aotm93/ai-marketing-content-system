@@ -187,3 +187,74 @@ class TestKeywordStrategyRouting:
         assert "PET" in descriptor
         assert "Bottle" in descriptor
         assert len(descriptor.split()) <= 6
+
+    def test_blocks_generic_explained_keyword_templates(self):
+        profile = WebsiteProfile(
+            product_categories=["dropper bottles"],
+            industry_terms=["wholesale"],
+            content_themes=["quality"],
+            target_audience="B2B buyers",
+            business_type="packaging supplier",
+            sample_keywords=["dropper bottle wholesale"],
+            customer_pain_points=["comparing MOQ and lead time"],
+            category_details=[],
+            tag_details=[],
+            product_records=[],
+        )
+        generator = ContentAwareKeywordGenerator(profile)
+
+        class CatalogMatch:
+            page_type = "category_support"
+            target_category_name = None
+            target_tag_name = None
+            primary_taxonomy_name = None
+            supporting_products = []
+
+        assessment = generator._assess_keyword_publishability(
+            "quality 100ml white pump explained",
+            CatalogMatch(),
+        )
+
+        assert assessment["publishable"] is False
+        assert assessment["reason"] in {"generic template phrasing", "attribute fragment instead of publishable topic"}
+
+    def test_candidate_carries_keyword_quality_and_serp_role(self):
+        profile = WebsiteProfile(
+            product_categories=["dropper bottles"],
+            industry_terms=["wholesale", "supplier"],
+            content_themes=["customization"],
+            target_audience="B2B buyers",
+            business_type="packaging supplier",
+            sample_keywords=["100ml dropper bottle supplier"],
+            customer_pain_points=["checking sample and MOQ terms"],
+            category_details=[],
+            tag_details=[],
+            product_records=[
+                ProductInsight(
+                    id=10,
+                    name="100ml Dropper Bottle",
+                    slug="100ml-dropper-bottle",
+                    url="https://example.com/product/100ml-dropper-bottle",
+                    category_names=["Dropper Bottles"],
+                    tag_names=["Glass"],
+                    material="Glass",
+                    capacity="100ml",
+                    closure_type="Dropper",
+                    use_case="Serum",
+                    moq="5000",
+                    lead_time="20 days",
+                )
+            ],
+        )
+        generator = ContentAwareKeywordGenerator(profile)
+        candidate = generator._build_candidate(
+            keyword="100ml dropper bottle supplier",
+            intent="commercial",
+            journey_stage="decision",
+            category="dropper bottles",
+            semantic_group="dropper",
+        )
+
+        assert candidate.keyword_publishable is True
+        assert candidate.keyword_quality_score >= 0.58
+        assert candidate.serp_role in {"supplier_evaluation", "procurement_faq"}

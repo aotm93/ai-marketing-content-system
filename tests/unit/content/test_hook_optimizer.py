@@ -8,7 +8,7 @@ import pytest
 from datetime import datetime
 
 from src.services.content.hook_optimizer import HookOptimizer
-from src.models.content_intelligence import ContentTopic, HookType, ResearchResult, TrendData, PainPoint
+from src.models.content_intelligence import ContentTopic, HookType, ResearchResult, TrendData, PainPoint, OptimizedTitle
 
 
 class TestHookOptimizer:
@@ -353,3 +353,21 @@ class TestHookOptimizer:
 
         selected_lower = selected.title.lower()
         assert any(term in selected_lower for term in ["tradeoff", "fit", "selection", "comparison"])
+
+    @pytest.mark.asyncio
+    async def test_select_best_title_uses_strict_query_fallback_when_all_variants_mismatch(self, optimizer):
+        variants = [
+            OptimizedTitle(title="Dropper Bottles: Supplier Benchmarks", hook_type=HookType.DATA, expected_ctr=0.05, rationale="x", test_variant="A"),
+            OptimizedTitle(title="Bottle Packaging: Buyer Checks", hook_type=HookType.PROBLEM, expected_ctr=0.05, rationale="y", test_variant="B"),
+        ]
+
+        selected = await optimizer.select_best_title(
+            variants,
+            strategy="balanced",
+            target_keyword="quality 100ml white pump explained",
+            content_lane="traffic_entry",
+            serp_role="application_fit",
+        )
+
+        assert "quality 100ml white pump explained" in selected.title.lower()
+        assert selected.test_variant == "Z"

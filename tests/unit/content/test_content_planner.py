@@ -109,9 +109,11 @@ class TestContentPlannerService:
             topic_title="Dropper Bottle Material Selection",
             content_lane="traffic_entry",
             search_stage="consideration",
+            serp_role="material_comparison",
         )
         prompt = svc._build_prompt(ctx.topic_title, ctx.target_keyword, ctx)
         assert "Content lane: traffic_entry" in prompt
+        assert "SERP role: material_comparison" in prompt
         assert "search-entry page" in prompt
 
 
@@ -139,6 +141,7 @@ class TestContentCreatorAgentIntegration:
             content_lane="traffic_entry",
             content_lane_confidence=0.82,
             search_stage="consideration",
+            serp_role="application_fit",
             semantic_keywords=[],
             internal_links=[],
             article_content_type="how_to",
@@ -170,6 +173,7 @@ class TestContentCreatorAgentIntegration:
             content_lane="procurement_conversion",
             content_lane_confidence=0.88,
             search_stage="decision",
+            serp_role="procurement_faq",
             semantic_keywords=[],
             internal_links=[],
             article_content_type=None,
@@ -193,3 +197,17 @@ class TestContentCreatorAgentIntegration:
         assert len(task["planned_outline"]) == 1
         assert task["content_lane"] == "traffic_entry"
         assert task["search_stage"] == "consideration"
+
+    def test_validate_synchronization_flags_unpublishable_keyword(self):
+        ctx = SEOContext(
+            source="GSC",
+            target_keyword="quality 100ml white pump explained",
+            topic_title="quality 100ml white pump explained",
+            selected_title="Dropper Bottle Supplier Evaluation",
+            keyword_publishable=False,
+            keyword_rejection_reason="generic template phrasing",
+        )
+        report = ctx.validate_synchronization()
+        issue_types = {issue["type"] for issue in report["issues"]}
+        assert "keyword_not_publishable" in issue_types
+        assert "title_keyword_mismatch" in issue_types
