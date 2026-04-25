@@ -21,6 +21,7 @@ import json
 from src.core.database import get_db
 from src.core.auth import get_current_admin
 from src.models.gsc_data import Opportunity
+from src.services.gsc_runtime import inspect_gsc_schema
 
 router = APIRouter(prefix="/api/v1/opportunities", tags=["opportunities"])
 
@@ -169,6 +170,22 @@ def _serialize_opportunity(opp: Opportunity) -> OpportunityResponse:
     )
 
 
+def _ensure_opportunity_schema_ready(db: Session) -> None:
+    schema = inspect_gsc_schema(db)
+    if schema["opportunity_materialization_ready"]:
+        return
+
+    raise HTTPException(
+        status_code=409,
+        detail={
+            "status": "degraded",
+            "reason": "opportunity_schema_not_ready",
+            "message": "The opportunities table schema is outdated. Apply the latest database migrations and retry.",
+            "schema": schema,
+        },
+    )
+
+
 # ==================== Endpoints ====================
 
 @router.get("/", response_model=OpportunityListResponse)
@@ -204,6 +221,7 @@ async def list_opportunities(
     - Sort by any metric
     - Pagination
     """
+    _ensure_opportunity_schema_ready(db)
     query = db.query(Opportunity)
     filters_applied = {}
     
@@ -298,6 +316,7 @@ async def get_opportunity_stats(
     admin: dict = Depends(get_current_admin)
 ):
     """Get opportunity statistics summary"""
+    _ensure_opportunity_schema_ready(db)
     
     # Total count
     total = db.query(Opportunity).count()
@@ -346,6 +365,7 @@ async def get_opportunity(
     admin: dict = Depends(get_current_admin)
 ):
     """Get single opportunity details"""
+    _ensure_opportunity_schema_ready(db)
     opp = db.query(Opportunity).filter(Opportunity.opportunity_id == opportunity_id).first()
     
     if not opp:
@@ -373,6 +393,7 @@ async def execute_opportunity(
     - refresh: Update content with new information
     - skip: Mark as skipped
     """
+    _ensure_opportunity_schema_ready(db)
     opp = db.query(Opportunity).filter(Opportunity.opportunity_id == opportunity_id).first()
     
     if not opp:
@@ -433,6 +454,7 @@ async def bulk_execute_opportunities(
     admin: dict = Depends(get_current_admin)
 ):
     """Execute action on multiple opportunities"""
+    _ensure_opportunity_schema_ready(db)
     
     results = []
     success_count = 0

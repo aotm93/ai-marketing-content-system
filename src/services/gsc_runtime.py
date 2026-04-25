@@ -11,44 +11,16 @@ from sqlalchemy.orm import Session
 from src.config import settings
 from src.config.utils import get_config_value
 from src.integrations.gsc_client import GSCAuthMethod, GSCClient
+from src.models.gsc_data import Opportunity, TopicCluster
 
 
-OPPORTUNITY_SYNC_REQUIRED_COLUMNS = {
-    "id",
-    "opportunity_id",
-    "opportunity_type",
-    "target_query",
-    "target_page",
-    "score",
-    "confidence",
-    "potential_clicks",
-    "current_position",
-    "current_impressions",
-    "current_ctr",
-    "current_clicks",
-    "action_type",
-    "action_details",
-    "status",
-    "priority",
-    "recommended_action_family",
-    "recommended_action_confidence",
-    "score_breakdown_json",
-    "decision_trace_json",
-    "engine_mode",
-    "engine_version",
-    "decision_window_key",
-}
+def _model_column_names(model: Any) -> set[str]:
+    return {column.name for column in model.__table__.columns}
 
-CLUSTER_SHADOW_REQUIRED_COLUMNS = {
-    "id",
-    "cluster_id",
-    "cluster_name",
-    "cluster_version",
-    "canonical_topic",
-    "intent_band",
-    "member_count",
-    "cluster_members_json",
-}
+
+OPPORTUNITY_SYNC_REQUIRED_COLUMNS = _model_column_names(Opportunity)
+
+CLUSTER_SHADOW_REQUIRED_COLUMNS = _model_column_names(TopicCluster)
 
 
 @dataclass(frozen=True)
