@@ -11,7 +11,7 @@ FROM python:3.11-slim AS python-builder
 WORKDIR /build
 
 # Install build dependencies only
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN DEBIAN_FRONTEND=noninteractive apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     libpq-dev \
     && rm -rf /var/lib/apt/lists/*
@@ -50,7 +50,7 @@ FROM python:3.11-slim AS production
 WORKDIR /app
 
 # Install only essential runtime dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN DEBIAN_FRONTEND=noninteractive apt-get update && apt-get install -y --no-install-recommends \
     libpq5 \
     curl \
     netcat-openbsd \
@@ -69,7 +69,7 @@ COPY --from=frontend-builder /build/out /app/src/dashboard/out
 
 # Copy application source code
 COPY src/ /app/src/
-COPY alembic/ /app/alembic/
+COPY migrations/ /app/migrations/
 COPY alembic.ini /app/
 
 # Copy static admin directory
