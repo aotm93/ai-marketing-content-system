@@ -1,17 +1,17 @@
 # Autopilot Spec
 
-Task: Fix ongoing production issues where generated article titles remain generic, repetitive, professionally weak, and mismatched to keywords.
+Task: Close the GSC connectivity and opportunity-persistence gaps that can leave the production opportunity pool empty even when Google Search Console has valid data.
 
 Requirements:
-- Stop generic awareness-style keyword templates from producing publishable topics.
-- Prevent non-publishable fragments like `quality 100ml white pump explained` from entering title generation.
-- Tighten website/category extraction so components like pumps/caps do not become article heads.
-- Add stronger keyword/title mismatch blocking before publish.
-- Introduce a more specific SERP role layer beyond broad lane classification.
-- Propagate SERP role into title generation, planning, and content-writing prompts.
-- Preserve existing lane-aware meta/CTA quality scoring and prior regressions.
+- Unify `GSC_ENABLED` behavior across admin, API, scheduler, and sync jobs.
+- Use one shared GSC client construction path for `GSC_AUTH_METHOD`, `GSC_CREDENTIALS_JSON`, and `GSC_CREDENTIALS_PATH`.
+- Separate live GSC preview from the persisted opportunity pool.
+- Add an independent sync/materialization path so `Opportunity` rows can be populated without `content_generation_job`.
+- Add readiness/migration diagnostics so missing schema cannot masquerade as an empty pool.
+- Preserve the demand-first, conversion-oriented cluster-priority plan already captured in the task PRD.
 
 Constraints:
 - No new dependencies.
-- Keep brownfield compatibility with scheduler/SEOContext pipeline.
-- Verify with targeted regression tests.
+- Brownfield-safe rollout with explicit rollback controls.
+- Keep baseline selector behavior available while the new bridge and sync lane are validated.
+- Verification must cover config parity, credential parity, idempotent persistence, and migration-readiness behavior.

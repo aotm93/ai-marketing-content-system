@@ -1,19 +1,27 @@
 
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from typing import List
 from pydantic import BaseModel
 
 from src.core.database import get_db
-from src.integrations.gsc_client import GSCClient, GSCDataSync, GSCAuthMethod
-from src.config import settings
+from src.integrations.gsc_client import GSCClient, GSCDataSync
 from src.core.auth import get_current_admin
+from src.services.gsc_opportunity_sync import materialize_gsc_opportunities
+from src.services.gsc_runtime import build_gsc_client, get_gsc_readiness, gsc_http_status, resolve_gsc_runtime
 
 router = APIRouter(prefix="/api/v1/gsc", tags=["Google Search Console"])
 
 class SyncRequest(BaseModel):
     days: int = 7
     force: bool = False
+
+
+class MaterializeRequest(BaseModel):
+    days: int = 28
+    limit: int = 100
+    force: bool = False
+
 
 class OpportunityResponse(BaseModel):
     query: str
@@ -23,36 +31,38 @@ class OpportunityResponse(BaseModel):
     position: float
     potential_score: float
 
+
+def _gsc_dependency_status(readiness: dict, fallback_status: int = 500) -> int:
+    status_code = gsc_http_status(readiness)
+    return fallback_status if status_code == 200 else status_code
+
+
 def get_gsc_client():
     """Dependency to get GSC Client"""
-    if not settings.gsc_enabled:
-        raise HTTPException(status_code=503, detail="GSC integration disabled")
-        
     try:
-        return GSCClient(
-            site_url=settings.gsc_site_url,
-            auth_method=GSCAuthMethod.SERVICE_ACCOUNT,
-            credentials_json=settings.gsc_credentials_json,
-            credentials_path=settings.gsc_credentials_path
+        return build_gsc_client(resolve_gsc_runtime())
+    except Exception as exc:
+        readiness = get_gsc_readiness()
+        raise HTTPException(
+            status_code=_gsc_dependency_status(readiness),
+            detail={**readiness, "error": str(exc)},
         )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"GSC Init Failed: {str(e)}")
 
 @router.get("/status")
 def get_status(
-    client: GSCClient = Depends(get_gsc_client),
+    db: Session = Depends(get_db),
     admin: dict = Depends(get_current_admin)
 ):
     """Get GSC connection status"""
-    try:
-        return client.health_check()
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
+    readiness = get_gsc_readiness(db, include_live_health=True)
+    status_code = gsc_http_status(readiness)
+    if status_code != 200:
+        raise HTTPException(status_code=status_code, detail=readiness)
+    return readiness
 
 @router.post("/sync")
 async def trigger_sync(
     request: SyncRequest,
-    background_tasks: BackgroundTasks,
     client: GSCClient = Depends(get_gsc_client),
     db: Session = Depends(get_db),
     admin: dict = Depends(get_current_admin)
@@ -68,6 +78,40 @@ async def trigger_sync(
     # For MVP, we run valid async immediately (request will hang but it's okay for admin action)
     result = await syncer.sync_queries(days_back=request.days)
     return result
+
+
+@router.post("/materialize-opportunities")
+def trigger_opportunity_materialization(
+    request: MaterializeRequest,
+    db: Session = Depends(get_db),
+    admin: dict = Depends(get_current_admin),
+):
+    """Persist live GSC opportunities into the Opportunity pool."""
+    try:
+        client = build_gsc_client(resolve_gsc_runtime())
+    except Exception as exc:
+        readiness = get_gsc_readiness(db)
+        raise HTTPException(
+            status_code=_gsc_dependency_status(readiness),
+            detail={**readiness, "error": str(exc)},
+        )
+
+    result = materialize_gsc_opportunities(
+        db,
+        client,
+        days=request.days,
+        limit=request.limit,
+        force=request.force,
+        triggered_by="manual",
+    )
+
+    if result["status"] == "success":
+        return result
+    if result["status"] == "degraded":
+        raise HTTPException(status_code=409, detail=result)
+    if result["status"] == "disabled":
+        raise HTTPException(status_code=503, detail=result)
+    raise HTTPException(status_code=500, detail=result)
 
 @router.get("/opportunities", response_model=List[OpportunityResponse])
 def get_opportunities(

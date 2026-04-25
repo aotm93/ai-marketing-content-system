@@ -1,5 +1,5 @@
-
 from sqlalchemy import create_engine
+from sqlalchemy.engine import make_url
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import QueuePool
 from src.config import settings
@@ -8,18 +8,23 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# Create engine with connection pool and timeout settings
-# This prevents hanging on startup if DB is not ready
+database_url = make_url(settings.database_url)
+connect_args = {}
+
+if database_url.drivername.startswith("sqlite"):
+    connect_args["check_same_thread"] = False
+else:
+    connect_args["connect_timeout"] = 10
+
+# Create engine with driver-aware connection settings.
 engine = create_engine(
     settings.database_url,
     poolclass=QueuePool,
     pool_size=settings.database_pool_size,
     max_overflow=settings.database_max_overflow,
-    pool_pre_ping=True,  # Verify connections before use
-    pool_recycle=3600,   # Recycle connections after 1 hour
-    connect_args={
-        "connect_timeout": 10,  # 10 second connection timeout
-    }
+    pool_pre_ping=True,
+    pool_recycle=3600,
+    connect_args=connect_args,
 )
 
 # Create session factory

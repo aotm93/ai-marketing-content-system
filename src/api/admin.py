@@ -8,7 +8,8 @@ from src.core.rate_limiter import check_rate_limit, login_rate_limiter
 from src.config import settings
 from src.core.database import get_db
 from sqlalchemy.orm import Session
-from src.config.utils import update_config_value
+from src.config.utils import serialize_multiline_entries, update_config_value
+from src.services.gsc_runtime import get_gsc_readiness
 
 router = APIRouter(prefix="/api/v1/admin", tags=["admin"])
 
@@ -103,7 +104,10 @@ async def verify_session(admin: dict = Depends(get_current_admin)):
 
 
 @router.get("/config", response_model=ConfigResponse)
-async def get_config(admin: dict = Depends(get_current_admin)):
+async def get_config(
+    admin: dict = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
     """
     Get current configuration (safe values only)
 
@@ -116,6 +120,17 @@ async def get_config(admin: dict = Depends(get_current_admin)):
             return "••••••••"  # Indicates value is set but hidden
         return ""
     
+    try:
+        gsc_readiness = get_gsc_readiness(db)
+    except Exception as exc:
+        gsc_readiness = {
+            "status": "error",
+            "issues": ["readiness_check_failed"],
+            "error": str(exc),
+            "schema": None,
+            "metrics": None,
+        }
+
     safe_config = {
         # Primary AI Provider
         "primary_ai_provider": settings.primary_ai_provider,
@@ -156,9 +171,34 @@ async def get_config(admin: dict = Depends(get_current_admin)):
         "max_concurrent_jobs": str(settings.max_concurrent_jobs),
         
         # P1: GSC
+        "gsc_enabled": "True" if settings.gsc_enabled else "False",
         "gsc_site_url": settings.gsc_site_url or "",
         "gsc_auth_method": settings.gsc_auth_method,
+        "gsc_credentials_path": settings.gsc_credentials_path or "",
         "gsc_credentials_json": mask_secret(settings.gsc_credentials_json),  # FIX: Show masked value (sensitive)
+        "gsc_opportunity_sync_enabled": "True" if settings.gsc_opportunity_sync_enabled else "False",
+        "gsc_runtime_status": gsc_readiness.get("status"),
+        "gsc_credential_source": gsc_readiness.get("credential_source"),
+        "gsc_schema_status": (gsc_readiness.get("schema") or {}).get("status"),
+        "gsc_last_raw_query_sync_at": (gsc_readiness.get("metrics") or {}).get("last_raw_query_sync_at"),
+        "gsc_last_opportunity_sync_at": (gsc_readiness.get("metrics") or {}).get("last_opportunity_sync_at"),
+        "gsc_last_opportunity_sync_status": (gsc_readiness.get("metrics") or {}).get("last_opportunity_sync_status"),
+        "gsc_persisted_opportunity_count": str((gsc_readiness.get("metrics") or {}).get("persisted_opportunity_count") or 0),
+        "gsc_readiness": gsc_readiness,
+
+        # Demand-priority steering
+        "cluster_engine_shadow_enabled": "True" if settings.cluster_engine_shadow_enabled else "False",
+        "cluster_engine_authoritative_enabled": "True" if settings.cluster_engine_authoritative_enabled else "False",
+        "cluster_engine_kill_switch_enabled": "True" if settings.cluster_engine_kill_switch_enabled else "False",
+        "action_ctr_authoritative_enabled": "True" if settings.action_ctr_authoritative_enabled else "False",
+        "action_refresh_authoritative_enabled": "True" if settings.action_refresh_authoritative_enabled else "False",
+        "action_internal_link_authoritative_enabled": "True" if settings.action_internal_link_authoritative_enabled else "False",
+        "action_new_content_authoritative_enabled": "True" if settings.action_new_content_authoritative_enabled else "False",
+        "action_backlink_authoritative_enabled": "True" if settings.action_backlink_authoritative_enabled else "False",
+        "reference_keywords": serialize_multiline_entries(settings.reference_keywords, max_entries=200),
+        "negative_keywords": serialize_multiline_entries(settings.negative_keywords, max_entries=200),
+        "commercial_priority_terms": serialize_multiline_entries(settings.commercial_priority_terms, max_entries=100),
+        "priority_target_pages": serialize_multiline_entries(settings.priority_target_pages, max_entries=100),
     }
 
     return ConfigResponse(
@@ -192,7 +232,14 @@ async def update_config(
         "AUTOPILOT_ENABLED", "AUTOPILOT_MODE", "PUBLISH_INTERVAL_MINUTES",
         "MAX_POSTS_PER_DAY", "MAX_CONCURRENT_JOBS",
         # P1: GSC
-        "GSC_SITE_URL", "GSC_AUTH_METHOD", "GSC_CREDENTIALS_JSON", "GSC_CREDENTIALS_PATH"
+        "GSC_ENABLED", "GSC_SITE_URL", "GSC_AUTH_METHOD", "GSC_CREDENTIALS_JSON", "GSC_CREDENTIALS_PATH",
+        "GSC_OPPORTUNITY_SYNC_ENABLED",
+        # GSC priority engine
+        "CLUSTER_ENGINE_SHADOW_ENABLED", "CLUSTER_ENGINE_AUTHORITATIVE_ENABLED", "CLUSTER_ENGINE_KILL_SWITCH_ENABLED",
+        "ACTION_CTR_AUTHORITATIVE_ENABLED", "ACTION_REFRESH_AUTHORITATIVE_ENABLED",
+        "ACTION_INTERNAL_LINK_AUTHORITATIVE_ENABLED", "ACTION_NEW_CONTENT_AUTHORITATIVE_ENABLED",
+        "ACTION_BACKLINK_AUTHORITATIVE_ENABLED",
+        "REFERENCE_KEYWORDS", "NEGATIVE_KEYWORDS", "COMMERCIAL_PRIORITY_TERMS", "PRIORITY_TARGET_PAGES",
     ]
 
     if request.config_key not in allowed_keys:
@@ -206,13 +253,29 @@ async def update_config(
         data_type = "string"
         key_upper = request.config_key.upper()
         
-        if key_upper in ["AUTOPILOT_ENABLED", "WORDPRESS_API_ENABLED", "ENABLE_METRICS"]:
+        if key_upper in [
+            "AUTOPILOT_ENABLED", "WORDPRESS_API_ENABLED", "ENABLE_METRICS",
+            "GSC_ENABLED", "GSC_OPPORTUNITY_SYNC_ENABLED",
+            "CLUSTER_ENGINE_SHADOW_ENABLED", "CLUSTER_ENGINE_AUTHORITATIVE_ENABLED",
+            "CLUSTER_ENGINE_KILL_SWITCH_ENABLED", "ACTION_CTR_AUTHORITATIVE_ENABLED",
+            "ACTION_REFRESH_AUTHORITATIVE_ENABLED", "ACTION_INTERNAL_LINK_AUTHORITATIVE_ENABLED",
+            "ACTION_NEW_CONTENT_AUTHORITATIVE_ENABLED", "ACTION_BACKLINK_AUTHORITATIVE_ENABLED",
+        ]:
             data_type = "bool"
         elif any(x in key_upper for x in ["_PORT", "_TIMEOUT", "_MINUTES", "_COUNT", "_MAX", "_ID"]):
             data_type = "int"
-            
+
+        normalized_value = request.config_value
+        if key_upper in [
+            "REFERENCE_KEYWORDS",
+            "NEGATIVE_KEYWORDS",
+            "COMMERCIAL_PRIORITY_TERMS",
+            "PRIORITY_TARGET_PAGES",
+        ]:
+            normalized_value = serialize_multiline_entries(request.config_value, max_entries=200)
+
         # Update in database and refresh settings
-        success = update_config_value(db, request.config_key, request.config_value, data_type)
+        success = update_config_value(db, request.config_key, normalized_value, data_type)
 
         if not success:
              raise Exception("Database update failed")

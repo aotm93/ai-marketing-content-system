@@ -119,6 +119,24 @@ class Settings(BaseSettings):
     gsc_sync_days_back: int = 28
     gsc_sync_interval_hours: int = 24
     gsc_enabled: bool = False
+    gsc_opportunity_sync_enabled: bool = True
+
+    # ==================== GSC Priority Engine (Demand-First) ====================
+
+    cluster_engine_shadow_enabled: bool = False
+    cluster_engine_authoritative_enabled: bool = False
+    cluster_engine_kill_switch_enabled: bool = False
+
+    action_ctr_authoritative_enabled: bool = False
+    action_refresh_authoritative_enabled: bool = False
+    action_internal_link_authoritative_enabled: bool = False
+    action_new_content_authoritative_enabled: bool = False
+    action_backlink_authoritative_enabled: bool = False
+
+    reference_keywords: str = ""
+    negative_keywords: str = ""
+    commercial_priority_terms: str = ""
+    priority_target_pages: str = ""
 
 
 settings = Settings()

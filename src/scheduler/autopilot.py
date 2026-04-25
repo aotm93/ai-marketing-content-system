@@ -26,6 +26,7 @@ except ImportError:
     APSCHEDULER_AVAILABLE = False
     AsyncIOScheduler = None
 
+from src.config import settings
 from .job_runner import JobConfig, JobStatus, get_job_runner
 
 logger = logging.getLogger(__name__)
@@ -302,6 +303,15 @@ class AutopilotScheduler:
             name="Cannibalization Scan",
             replace_existing=True
         )
+
+        if settings.gsc_opportunity_sync_enabled and "gsc_opportunity_sync" in self._job_functions:
+            self.scheduler.add_job(
+                self._run_gsc_opportunity_sync,
+                IntervalTrigger(hours=max(1, int(settings.gsc_sync_interval_hours))),
+                id="gsc_opportunity_sync",
+                name="GSC Opportunity Sync",
+                replace_existing=True
+            )
         
         logger.info(f"Scheduled jobs: interval={self.config.publish_interval_minutes}min")
     
@@ -419,6 +429,27 @@ class AutopilotScheduler:
                     
         except Exception as e:
             logger.error(f"Scheduled cannibalization scan failed: {e}")
+
+    async def _run_gsc_opportunity_sync(self):
+        """Execute the independent GSC opportunity materialization lane."""
+        logger.info("Starting scheduled GSC opportunity sync")
+
+        try:
+            if "gsc_opportunity_sync" in self._job_functions:
+                job_func = self._job_functions["gsc_opportunity_sync"]
+                await self.job_runner.run_job(
+                    job_type="gsc_opportunity_sync",
+                    job_func=job_func,
+                    job_data={
+                        "days": settings.gsc_sync_days_back,
+                        "limit": 100,
+                        "triggered_by": "scheduler",
+                    },
+                )
+            else:
+                logger.warning("GSC opportunity sync job not registered")
+        except Exception as e:
+            logger.error(f"Scheduled GSC opportunity sync failed: {e}")
     
     async def run_once(self, job_type: str = "content_generation", job_data: Optional[Dict] = None) -> Dict[str, Any]:
         """

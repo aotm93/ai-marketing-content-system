@@ -149,8 +149,30 @@ function populateConfigFields(config) {
         'publish_interval_minutes': 'PUBLISH_INTERVAL_MINUTES',
         'max_posts_per_day': 'MAX_POSTS_PER_DAY',
         'max_concurrent_jobs': 'MAX_CONCURRENT_JOBS',
+        'gsc_enabled': 'GSC_ENABLED',
         'gsc_site_url': 'GSC_SITE_URL',
-        'gsc_auth_method': 'GSC_AUTH_METHOD'
+        'gsc_auth_method': 'GSC_AUTH_METHOD',
+        'gsc_credentials_path': 'GSC_CREDENTIALS_PATH',
+        'gsc_opportunity_sync_enabled': 'GSC_OPPORTUNITY_SYNC_ENABLED',
+        'gsc_runtime_status': 'GSC_RUNTIME_STATUS',
+        'gsc_credential_source': 'GSC_CREDENTIAL_SOURCE',
+        'gsc_schema_status': 'GSC_SCHEMA_STATUS',
+        'gsc_last_raw_query_sync_at': 'GSC_LAST_RAW_QUERY_SYNC_AT',
+        'gsc_last_opportunity_sync_at': 'GSC_LAST_OPPORTUNITY_SYNC_AT',
+        'gsc_last_opportunity_sync_status': 'GSC_LAST_OPPORTUNITY_SYNC_STATUS',
+        'gsc_persisted_opportunity_count': 'GSC_PERSISTED_OPPORTUNITY_COUNT',
+        'cluster_engine_shadow_enabled': 'CLUSTER_ENGINE_SHADOW_ENABLED',
+        'cluster_engine_authoritative_enabled': 'CLUSTER_ENGINE_AUTHORITATIVE_ENABLED',
+        'cluster_engine_kill_switch_enabled': 'CLUSTER_ENGINE_KILL_SWITCH_ENABLED',
+        'action_ctr_authoritative_enabled': 'ACTION_CTR_AUTHORITATIVE_ENABLED',
+        'action_refresh_authoritative_enabled': 'ACTION_REFRESH_AUTHORITATIVE_ENABLED',
+        'action_internal_link_authoritative_enabled': 'ACTION_INTERNAL_LINK_AUTHORITATIVE_ENABLED',
+        'action_new_content_authoritative_enabled': 'ACTION_NEW_CONTENT_AUTHORITATIVE_ENABLED',
+        'action_backlink_authoritative_enabled': 'ACTION_BACKLINK_AUTHORITATIVE_ENABLED',
+        'reference_keywords': 'REFERENCE_KEYWORDS',
+        'negative_keywords': 'NEGATIVE_KEYWORDS',
+        'commercial_priority_terms': 'COMMERCIAL_PRIORITY_TERMS',
+        'priority_target_pages': 'PRIORITY_TARGET_PAGES'
     };
 
     // Sensitive fields (API Keys, Passwords) - these return masked values from backend
@@ -210,7 +232,13 @@ async function handleSaveAll() {
         // Autopilot Keys
         'AUTOPILOT_ENABLED', 'AUTOPILOT_MODE', 'PUBLISH_INTERVAL_MINUTES',
         'MAX_POSTS_PER_DAY', 'MAX_CONCURRENT_JOBS',
-        'GSC_SITE_URL', 'GSC_AUTH_METHOD', 'GSC_CREDENTIALS_JSON'
+        'GSC_ENABLED', 'GSC_SITE_URL', 'GSC_AUTH_METHOD', 'GSC_CREDENTIALS_PATH', 'GSC_CREDENTIALS_JSON',
+        'GSC_OPPORTUNITY_SYNC_ENABLED',
+        'CLUSTER_ENGINE_SHADOW_ENABLED', 'CLUSTER_ENGINE_AUTHORITATIVE_ENABLED',
+        'CLUSTER_ENGINE_KILL_SWITCH_ENABLED', 'ACTION_CTR_AUTHORITATIVE_ENABLED',
+        'ACTION_REFRESH_AUTHORITATIVE_ENABLED', 'ACTION_INTERNAL_LINK_AUTHORITATIVE_ENABLED',
+        'ACTION_NEW_CONTENT_AUTHORITATIVE_ENABLED', 'ACTION_BACKLINK_AUTHORITATIVE_ENABLED',
+        'REFERENCE_KEYWORDS', 'NEGATIVE_KEYWORDS', 'COMMERCIAL_PRIORITY_TERMS', 'PRIORITY_TARGET_PAGES'
     ];
 
     // Sensitive fields that should not be overwritten with empty values if they already exist

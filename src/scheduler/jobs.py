@@ -16,6 +16,8 @@ from datetime import datetime, timedelta
 from src.config import settings
 from src.integrations import WordPressAdapter
 from src.integrations.publisher_adapter import PublishableContent, PublishStatus
+from src.services.gsc_opportunity_sync import materialize_gsc_opportunities
+from src.services.gsc_runtime import get_gsc_client_or_none, get_gsc_readiness
 
 logger = logging.getLogger(__name__)
 
@@ -1234,15 +1236,112 @@ async def content_generation_job(data: Dict[str, Any]) -> Dict[str, Any]:
         # This will be populated regardless of which keyword source succeeds
         seo_context = None
         selected_topic = None
+        priority_gsc_client = None
+
+        shadow_requested = bool(
+            data.get("cluster_engine_shadow_enabled", settings.cluster_engine_shadow_enabled)
+            or data.get("cluster_engine_authoritative_enabled", settings.cluster_engine_authoritative_enabled)
+        )
+        gsc_readiness = get_gsc_readiness(db)
+
+        if shadow_requested:
+            try:
+                from src.services.gsc_priority_engine import EngineFlags, GSCPriorityEngine
+
+                priority_gsc_client = get_gsc_client_or_none()
+                if priority_gsc_client is None:
+                    raise RuntimeError(f"GSC runtime not ready: {gsc_readiness.get('status')}")
+
+                end_date = datetime.now().strftime('%Y-%m-%d')
+                start_date = (datetime.now() - timedelta(days=28)).strftime('%Y-%m-%d')
+                try:
+                    shadow_rows = priority_gsc_client.get_search_analytics(
+                        start_date=start_date,
+                        end_date=end_date,
+                        dimensions=["query", "page"],
+                        row_limit=250,
+                    )
+                except Exception:
+                    shadow_rows = priority_gsc_client.get_low_hanging_fruits(limit=80)
+
+                priority_flags = EngineFlags(
+                    shadow_enabled=bool(data.get("cluster_engine_shadow_enabled", settings.cluster_engine_shadow_enabled)),
+                    authoritative_enabled=bool(
+                        data.get("cluster_engine_authoritative_enabled", settings.cluster_engine_authoritative_enabled)
+                    ),
+                    kill_switch_enabled=bool(
+                        data.get("cluster_engine_kill_switch_enabled", settings.cluster_engine_kill_switch_enabled)
+                    ),
+                    action_ctr_authoritative_enabled=bool(
+                        data.get("action_ctr_authoritative_enabled", settings.action_ctr_authoritative_enabled)
+                    ),
+                    action_refresh_authoritative_enabled=bool(
+                        data.get("action_refresh_authoritative_enabled", settings.action_refresh_authoritative_enabled)
+                    ),
+                    action_internal_link_authoritative_enabled=bool(
+                        data.get(
+                            "action_internal_link_authoritative_enabled",
+                            settings.action_internal_link_authoritative_enabled,
+                        )
+                    ),
+                    action_new_content_authoritative_enabled=bool(
+                        data.get("action_new_content_authoritative_enabled", settings.action_new_content_authoritative_enabled)
+                    ),
+                    action_backlink_authoritative_enabled=bool(
+                        data.get("action_backlink_authoritative_enabled", settings.action_backlink_authoritative_enabled)
+                    ),
+                )
+
+                priority_engine = GSCPriorityEngine(
+                    site_url=settings.gsc_site_url,
+                    flags=priority_flags,
+                    context_resolver=lambda query, page: _route_catalog_context(
+                        query,
+                        _match_catalog_context(query, website_profile),
+                    ),
+                    publishability_checker=lambda query, context: _assess_keyword_publishability(
+                        query,
+                        website_profile,
+                        context,
+                    ),
+                )
+                shadow_run = priority_engine.build_shadow_run(
+                    shadow_rows,
+                    used_keywords=used_keyword_set,
+                    limit=15,
+                )
+
+                if shadow_run.get("decisions"):
+                    priority_engine.persist_shadow_decisions(db, shadow_run["decisions"])
+
+                top_shadow_decision = shadow_run.get("top_decision") or {}
+                result["steps"].append({
+                    "step": "cluster_engine_shadow",
+                    "data": {
+                        "cluster_count": shadow_run.get("metrics", {}).get("cluster_count", 0),
+                        "fallback_rate": shadow_run.get("metrics", {}).get("fallback_rate", 0.0),
+                        "trace_completeness": shadow_run.get("metrics", {}).get("trace_completeness", 0.0),
+                        "top_cluster_id": top_shadow_decision.get("cluster_id"),
+                        "top_action": top_shadow_decision.get("selected_action_family"),
+                        "top_confidence": top_shadow_decision.get("confidence"),
+                    }
+                })
+            except Exception as shadow_error:
+                logger.warning(f"Cluster engine shadow run failed: {shadow_error}")
+                result["steps"].append({
+                    "step": "cluster_engine_shadow",
+                    "data": {
+                        "status": "failed",
+                        "error": str(shadow_error),
+                        "readiness_status": gsc_readiness.get("status"),
+                        "readiness_issues": gsc_readiness.get("issues", []),
+                    }
+                })
         
         # 1.1 Try GSC (Optimization)
         try:
-            from src.integrations.gsc_client import GSCClient
-            if settings.gsc_site_url and settings.gsc_credentials_json:
-                gsc = GSCClient(
-                    site_url=settings.gsc_site_url,
-                    credentials_json=settings.gsc_credentials_json
-                )
+            gsc = priority_gsc_client or get_gsc_client_or_none()
+            if gsc:
                 opportunities = gsc.get_low_hanging_fruits(limit=20)  # Fetch more to filter
 
                 scored_gsc = []
@@ -1407,21 +1506,7 @@ async def content_generation_job(data: Dict[str, Any]) -> Dict[str, Any]:
                         from src.models.content_intelligence import ContentTopic, HookType
                         from src.models.seo_context import SEOContext, SEOElementStatus
                         hook_optimizer = HookOptimizer()
-                        
-                        # Create temporary topic for title optimization
-                        temp_topic = ContentTopic(
-                            title=target_keyword,
-                            angle=f"search demand analysis for {target_keyword}",
-                            hook_type=_hook_type_for_serp_role(content_aware_catalog_context.get("serp_role")),
-                            industry=website_profile.business_type if website_profile else "packaging",
-                            target_audience=website_profile.target_audience if website_profile else "b2b_buyers",
-                            business_intent=0.7,
-                            trend_score=0.6,
-                            competition_score=0.5,
-                            differentiation_score=0.6,
-                            brand_alignment_score=0.7,
-                            value_score=0.65
-                        )
+
                         content_aware_catalog_context = {
                             "page_type": selected.page_type,
                             "target_category_name": selected.target_category,
@@ -1442,6 +1527,21 @@ async def content_generation_job(data: Dict[str, Any]) -> Dict[str, Any]:
                         content_aware_catalog_context = _route_catalog_context(
                             target_keyword,
                             content_aware_catalog_context,
+                        )
+                        
+                        # Create temporary topic for title optimization
+                        temp_topic = ContentTopic(
+                            title=target_keyword,
+                            angle=f"search demand analysis for {target_keyword}",
+                            hook_type=_hook_type_for_serp_role(content_aware_catalog_context.get("serp_role")),
+                            industry=website_profile.business_type if website_profile else "packaging",
+                            target_audience=website_profile.target_audience if website_profile else "b2b_buyers",
+                            business_intent=0.7,
+                            trend_score=0.6,
+                            competition_score=0.5,
+                            differentiation_score=0.6,
+                            brand_alignment_score=0.7,
+                            value_score=0.65
                         )
                         quality_assessment = _assess_keyword_publishability(
                             target_keyword,
@@ -1952,7 +2052,7 @@ async def content_generation_job(data: Dict[str, Any]) -> Dict[str, Any]:
         
         # Use SEOContext to create synchronized content
         if seo_context:
-            logger.info(f"Using SEOContext for synchronized content generation")
+            logger.info("Using SEOContext for synchronized content generation")
             logger.info(f"Selected title: {seo_context.selected_title}")
             logger.info(f"Hook type: {seo_context.title_hook_type.value if seo_context.title_hook_type else 'N/A'}")
             _ensure_catalog_outline(seo_context)
@@ -2391,26 +2491,23 @@ async def content_refresh_job(data: Dict[str, Any]) -> Dict[str, Any]:
             posts_to_refresh.append({"post_id": post_id, "reason": "manual_request"})
         
         # Strategy 2: Auto-detect declining pages via GSC
-        elif auto_detect and settings.gsc_site_url and settings.gsc_credentials_json:
+        elif auto_detect:
             try:
-                from src.integrations.gsc_client import GSCClient
-                gsc = GSCClient(
-                    site_url=settings.gsc_site_url,
-                    credentials_json=settings.gsc_credentials_json
-                )
-                
-                declining = gsc.get_declining_pages(compare_days=28, decline_threshold=0.2)
-                
-                for page in declining[:max_posts]:
-                    # Extract post ID from URL (assumes standard WP permalink)
-                    page_url = page.get("page", "")
-                    # Try to get post by URL
-                    posts_to_refresh.append({
-                        "page_url": page_url,
-                        "reason": f"GSC decline: {page.get('change_percent')}%",
-                        "metrics": page
-                    })
-                    
+                gsc = get_gsc_client_or_none()
+                if gsc:
+                    declining = gsc.get_declining_pages(compare_days=28, decline_threshold=0.2)
+
+                    for page in declining[:max_posts]:
+                        # Extract post ID from URL (assumes standard WP permalink)
+                        page_url = page.get("page", "")
+                        # Try to get post by URL
+                        posts_to_refresh.append({
+                            "page_url": page_url,
+                            "reason": f"GSC decline: {page.get('change_percent')}%",
+                            "metrics": page
+                        })
+                else:
+                    logger.info("Skipping GSC refresh auto-detect because GSC runtime is not ready")
             except Exception as e:
                 logger.warning(f"GSC auto-detect failed: {e}")
         
@@ -2760,14 +2857,9 @@ async def cannibalization_analysis_job(data: Dict[str, Any]) -> Dict[str, Any]:
         
         # Fetch GSC data
         gsc_data_dicts = []
-        if settings.gsc_site_url and settings.gsc_credentials_json:
+        gsc = get_gsc_client_or_none()
+        if gsc:
             try:
-                from src.integrations.gsc_client import GSCClient
-                gsc = GSCClient(
-                    site_url=settings.gsc_site_url,
-                    credentials_json=settings.gsc_credentials_json
-                )
-                
                 # Fetch last 30 days of data
                 end_date = datetime.now().strftime('%Y-%m-%d')
                 start_date = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
@@ -2792,7 +2884,8 @@ async def cannibalization_analysis_job(data: Dict[str, Any]) -> Dict[str, Any]:
         else:
             return {
                 "status": "skipped", 
-                "message": "GSC not configured",
+                "message": "GSC not ready",
+                "readiness": get_gsc_readiness(),
                 "completed_at": datetime.now().isoformat()
             }
             
@@ -2833,6 +2926,56 @@ async def cannibalization_analysis_job(data: Dict[str, Any]) -> Dict[str, Any]:
     return result
 
 
+async def gsc_opportunity_sync_job(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Independent job to materialize live GSC opportunities into the DB pool."""
+    from src.core.database import get_db
+
+    logger.info("Starting GSC opportunity sync job")
+
+    result = {
+        "job_type": "gsc_opportunity_sync",
+        "started_at": datetime.now().isoformat(),
+    }
+
+    db = next(get_db())
+    try:
+        readiness = get_gsc_readiness(db)
+        if readiness.get("status") in {"disabled", "misconfigured", "error"}:
+            result.update({
+                "status": "skipped",
+                "message": "GSC runtime is not ready",
+                "readiness": readiness,
+            })
+            return result
+
+        client = get_gsc_client_or_none()
+        if client is None:
+            result.update({
+                "status": "skipped",
+                "message": "Unable to initialize GSC client",
+                "readiness": readiness,
+            })
+            return result
+
+        sync_result = materialize_gsc_opportunities(
+            db,
+            client,
+            days=data.get("days", settings.gsc_sync_days_back),
+            limit=data.get("limit", 100),
+            force=bool(data.get("force", False)),
+            triggered_by=data.get("triggered_by", "scheduler"),
+        )
+        result.update(sync_result)
+        return result
+    except Exception as exc:
+        logger.error(f"GSC opportunity sync job failed: {exc}")
+        result.update({"status": "failed", "error": str(exc)})
+        return result
+    finally:
+        result["completed_at"] = datetime.now().isoformat()
+        db.close()
+
+
 # Job registry for easy registration with autopilot
 # Note: Traffic acquisition jobs are registered at end of file after function definitions
 JOB_REGISTRY = {
@@ -2841,6 +2984,7 @@ JOB_REGISTRY = {
     "content_refresh": content_refresh_job,
     "internal_linking": internal_linking_job,
     "cannibalization_analysis": cannibalization_analysis_job,
+    "gsc_opportunity_sync": gsc_opportunity_sync_job,
 }
 
 
@@ -3016,7 +3160,6 @@ async def weekly_keyword_refresh_job():
     3. Store/update keywords in database
     """
     from src.services.keyword_strategy import ContentAwareKeywordGenerator
-    from src.integrations.keyword_client import KeywordClient
     from src.models.keyword import Keyword
     from src.core.database import get_db
     

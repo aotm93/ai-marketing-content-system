@@ -215,6 +215,13 @@
                             content updates.
                         </p>
                         <div class="config-item">
+                            <label>GSC Enabled</label>
+                            <select id="GSC_ENABLED" class="config-input">
+                                <option value="False">Disabled</option>
+                                <option value="True">Enabled</option>
+                            </select>
+                        </div>
+                        <div class="config-item">
                             <label>Site URL (e.g., sc-domain:example.com)</label>
                             <input type="text" id="GSC_SITE_URL" class="config-input"
                                 placeholder="sc-domain:mysite.com">
@@ -223,13 +230,53 @@
                             <label>Auth Method</label>
                             <select id="GSC_AUTH_METHOD" class="config-input">
                                 <option value="service_account">Service Account</option>
-                                <option value="oauth">OAuth</option>
+                                <option value="oauth">OAuth (not supported yet)</option>
                             </select>
+                        </div>
+                        <div class="config-item">
+                            <label>Credentials File Path</label>
+                            <input type="text" id="GSC_CREDENTIALS_PATH" class="config-input"
+                                placeholder="C:\path\to\gsc-service-account.json">
                         </div>
                         <div class="config-item" style="grid-column: span 2;">
                             <label>Service Account JSON Content</label>
                             <textarea id="GSC_CREDENTIALS_JSON" class="config-input"
                                 style="height: 100px; font-family: monospace;"></textarea>
+                        </div>
+                        <div class="config-item">
+                            <label>Opportunity Sync</label>
+                            <select id="GSC_OPPORTUNITY_SYNC_ENABLED" class="config-input">
+                                <option value="True">Enabled</option>
+                                <option value="False">Disabled</option>
+                            </select>
+                        </div>
+                        <div class="config-item">
+                            <label>Runtime Status</label>
+                            <input type="text" id="GSC_RUNTIME_STATUS" class="config-input" readonly>
+                        </div>
+                        <div class="config-item">
+                            <label>Credential Source</label>
+                            <input type="text" id="GSC_CREDENTIAL_SOURCE" class="config-input" readonly>
+                        </div>
+                        <div class="config-item">
+                            <label>Schema Status</label>
+                            <input type="text" id="GSC_SCHEMA_STATUS" class="config-input" readonly>
+                        </div>
+                        <div class="config-item">
+                            <label>Last Raw Query Sync</label>
+                            <input type="text" id="GSC_LAST_RAW_QUERY_SYNC_AT" class="config-input" readonly>
+                        </div>
+                        <div class="config-item">
+                            <label>Last Opportunity Sync</label>
+                            <input type="text" id="GSC_LAST_OPPORTUNITY_SYNC_AT" class="config-input" readonly>
+                        </div>
+                        <div class="config-item">
+                            <label>Last Opportunity Sync Status</label>
+                            <input type="text" id="GSC_LAST_OPPORTUNITY_SYNC_STATUS" class="config-input" readonly>
+                        </div>
+                        <div class="config-item">
+                            <label>Persisted Opportunity Count</label>
+                            <input type="text" id="GSC_PERSISTED_OPPORTUNITY_COUNT" class="config-input" readonly>
                         </div>
                     </div>
                 </div>
@@ -268,6 +315,95 @@
                         <div class="config-item">
                             <label>Max Concurrent Jobs</label>
                             <input type="number" id="MAX_CONCURRENT_JOBS" class="config-input">
+                        </div>
+                    </div>
+                </div>
+
+                <div class="config-section">
+                    <h3>Demand-Priority Engine</h3>
+                    <div class="config-grid">
+                        <p style="grid-column: span 3; color: #666; font-size: 0.9em; margin-bottom: 15px;">
+                            Use GSC demand clusters to recommend the next best action. Reference keywords guide ranking
+                            only. They do not bypass demand validation, deduplication, or publishability checks.
+                        </p>
+                        <div class="config-item">
+                            <label>Shadow Mode</label>
+                            <select id="CLUSTER_ENGINE_SHADOW_ENABLED" class="config-input">
+                                <option value="True">Enabled</option>
+                                <option value="False">Disabled</option>
+                            </select>
+                        </div>
+                        <div class="config-item">
+                            <label>Authoritative Mode</label>
+                            <select id="CLUSTER_ENGINE_AUTHORITATIVE_ENABLED" class="config-input">
+                                <option value="False">Disabled</option>
+                                <option value="True">Enabled</option>
+                            </select>
+                        </div>
+                        <div class="config-item">
+                            <label>Kill Switch</label>
+                            <select id="CLUSTER_ENGINE_KILL_SWITCH_ENABLED" class="config-input">
+                                <option value="False">Normal</option>
+                                <option value="True">Force Baseline</option>
+                            </select>
+                        </div>
+                        <div class="config-item">
+                            <label>CTR Authority</label>
+                            <select id="ACTION_CTR_AUTHORITATIVE_ENABLED" class="config-input">
+                                <option value="False">Disabled</option>
+                                <option value="True">Enabled</option>
+                            </select>
+                        </div>
+                        <div class="config-item">
+                            <label>Refresh Authority</label>
+                            <select id="ACTION_REFRESH_AUTHORITATIVE_ENABLED" class="config-input">
+                                <option value="False">Disabled</option>
+                                <option value="True">Enabled</option>
+                            </select>
+                        </div>
+                        <div class="config-item">
+                            <label>Internal Link Authority</label>
+                            <select id="ACTION_INTERNAL_LINK_AUTHORITATIVE_ENABLED" class="config-input">
+                                <option value="False">Disabled</option>
+                                <option value="True">Enabled</option>
+                            </select>
+                        </div>
+                        <div class="config-item">
+                            <label>New Content Authority</label>
+                            <select id="ACTION_NEW_CONTENT_AUTHORITATIVE_ENABLED" class="config-input">
+                                <option value="False">Disabled</option>
+                                <option value="True">Enabled</option>
+                            </select>
+                        </div>
+                        <div class="config-item">
+                            <label>Backlink Authority</label>
+                            <select id="ACTION_BACKLINK_AUTHORITATIVE_ENABLED" class="config-input">
+                                <option value="False">Disabled</option>
+                                <option value="True">Enabled</option>
+                            </select>
+                        </div>
+                        <div class="config-item" style="grid-column: span 3;">
+                            <label>Reference Keywords</label>
+                            <textarea id="REFERENCE_KEYWORDS" class="config-input"
+                                style="height: 110px;" placeholder="One keyword per line"></textarea>
+                            <small style="color: #666; display: block; margin-top: 5px;">
+                                Soft guidance only. Use customer-value and conversion-adjacent terms.
+                            </small>
+                        </div>
+                        <div class="config-item">
+                            <label>Negative Keywords</label>
+                            <textarea id="NEGATIVE_KEYWORDS" class="config-input"
+                                style="height: 110px;" placeholder="One keyword per line"></textarea>
+                        </div>
+                        <div class="config-item">
+                            <label>Commercial Priority Terms</label>
+                            <textarea id="COMMERCIAL_PRIORITY_TERMS" class="config-input"
+                                style="height: 110px;" placeholder="supplier&#10;quote&#10;bulk"></textarea>
+                        </div>
+                        <div class="config-item">
+                            <label>Priority Target Pages</label>
+                            <textarea id="PRIORITY_TARGET_PAGES" class="config-input"
+                                style="height: 110px;" placeholder="/collections/custom-bottles"></textarea>
                         </div>
                     </div>
                 </div>

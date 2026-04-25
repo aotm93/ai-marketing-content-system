@@ -145,11 +145,14 @@ class ContentAction(Base, TimestampMixin):
     
     # Related query (for SEO optimizations)
     query = Column(String(255), nullable=True, index=True)  # The search query this optimization targets
-    
+    cluster_id = Column(String(64), nullable=True, index=True)
+    decision_window_key = Column(String(128), nullable=True, index=True)
+
     # Change details
     before_snapshot = Column(JSON, nullable=True)  # {title, description, content_excerpt, meta}
     after_snapshot = Column(JSON, nullable=True)   # {title, description, content_excerpt, meta}
     changes_summary = Column(Text, nullable=True)
+    decision_snapshot = Column(JSON, nullable=True)
     
     # Reason for change
     reason = Column(Text, nullable=True)  # Why this change was made (e.g., "Low CTR optimization", "Position 8-20 refresh")
@@ -183,8 +186,11 @@ class ContentAction(Base, TimestampMixin):
             "post_id": self.post_id,
             "post_title": self.post_title,
             "query": self.query,
+            "cluster_id": self.cluster_id,
+            "decision_window_key": self.decision_window_key,
             "reason": self.reason,
             "changes_summary": self.changes_summary,
+            "decision_snapshot": self.decision_snapshot,
             "status": self.status,
             "metrics_before": self.metrics_before,
             "metrics_after": self.metrics_after,

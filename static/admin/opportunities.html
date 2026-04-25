@@ -578,6 +578,7 @@
                         <option value="position_improve">Position Improve</option>
                         <option value="content_refresh">Content Refresh</option>
                         <option value="new_page">New Page</option>
+                        <option value="cluster_priority">Cluster Priority</option>
                     </select>
                 </div>
                 <div class="filter-group">
@@ -875,6 +876,8 @@
                     </td>
                     <td>
                         <div class="query-text">${escapeHtml(opp.target_query || 'N/A')}</div>
+                        ${opp.cluster_name ? `<div class="page-text">Cluster: ${escapeHtml(opp.cluster_name)}</div>` : ''}
+                        ${opp.recommended_action_family ? `<div class="page-text">Action: ${escapeHtml(opp.recommended_action_family)}</div>` : ''}
                         <div class="page-text">${escapeHtml(opp.target_page || '')}</div>
                     </td>
                     <td><span class="badge badge-type">${formatType(opp.type)}</span></td>

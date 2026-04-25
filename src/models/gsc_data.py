@@ -11,8 +11,20 @@ Stores:
 from sqlalchemy import Column, Integer, String, Float, DateTime, Text, Index, UniqueConstraint, Date
 from datetime import datetime
 from typing import Dict, Any
+import json
 
 from .base import Base, TimestampMixin
+
+
+def _safe_json_load(value: str | None) -> Any:
+    """Parse JSON text defensively for API-facing model helpers."""
+    if not value:
+        return None
+
+    try:
+        return json.loads(value)
+    except (TypeError, ValueError):
+        return None
 
 
 class GSCQuery(Base, TimestampMixin):
@@ -160,12 +172,28 @@ class Opportunity(Base, TimestampMixin):
     target_query = Column(String(500), nullable=True)
     target_page = Column(String(1024), nullable=True)
     target_post_id = Column(Integer, nullable=True)
-    
+    cluster_id = Column(String(64), nullable=True, index=True)
+    cluster_name = Column(String(255), nullable=True)
+    cluster_version = Column(String(32), nullable=True)
+    decision_unit_type = Column(String(50), nullable=True)
+
     # Scoring
     score = Column(Float, default=0.0, index=True)  # 0-100 priority score
     potential_clicks = Column(Integer, default=0)  # Estimated additional clicks
     confidence = Column(Float, default=0.0)  # 0-1 confidence level
-    
+    recommended_action_family = Column(String(50), nullable=True, index=True)
+    recommended_action_confidence = Column(Float, default=0.0)
+    score_breakdown_json = Column(Text, nullable=True)
+    steering_matches_json = Column(Text, nullable=True)
+    decision_trace_json = Column(Text, nullable=True)
+    support_role = Column(String(30), nullable=True)
+    target_asset_type = Column(String(50), nullable=True)
+    engine_mode = Column(String(20), nullable=True, index=True)
+    engine_version = Column(String(32), nullable=True)
+    fallback_reason = Column(Text, nullable=True)
+    decision_window_key = Column(String(128), nullable=True, index=True)
+    shadow_rank = Column(Integer, nullable=True)
+
     # Current metrics (snapshot when opportunity was created)
     current_position = Column(Float, nullable=True)
     current_impressions = Column(Integer, nullable=True)
@@ -201,11 +229,28 @@ class Opportunity(Base, TimestampMixin):
             "type": self.opportunity_type,
             "target_query": self.target_query,
             "target_page": self.target_page,
+            "cluster_id": self.cluster_id,
+            "cluster_name": self.cluster_name,
+            "cluster_version": self.cluster_version,
+            "decision_unit_type": self.decision_unit_type,
             "score": round(self.score, 1),
             "potential_clicks": self.potential_clicks,
+            "confidence": round(self.confidence or 0.0, 3),
             "current_position": self.current_position,
             "current_impressions": self.current_impressions,
             "action_type": self.action_type,
+            "recommended_action_family": self.recommended_action_family,
+            "recommended_action_confidence": round(self.recommended_action_confidence or 0.0, 3),
+            "score_breakdown": _safe_json_load(self.score_breakdown_json),
+            "steering_matches": _safe_json_load(self.steering_matches_json),
+            "decision_trace": _safe_json_load(self.decision_trace_json),
+            "support_role": self.support_role,
+            "target_asset_type": self.target_asset_type,
+            "engine_mode": self.engine_mode,
+            "engine_version": self.engine_version,
+            "fallback_reason": self.fallback_reason,
+            "decision_window_key": self.decision_window_key,
+            "shadow_rank": self.shadow_rank,
             "status": self.status,
             "priority": self.priority,
             "created_at": self.created_at.isoformat() if self.created_at else None
@@ -234,7 +279,17 @@ class TopicCluster(Base, TimestampMixin):
     # Cluster metadata
     intent = Column(String(50), nullable=True)  # informational, commercial, transactional
     topic_keywords = Column(Text, nullable=True)  # JSON array of related keywords
-    
+    cluster_version = Column(String(32), nullable=True)
+    canonical_topic = Column(String(255), nullable=True)
+    intent_band = Column(String(50), nullable=True)
+    member_count = Column(Integer, default=0)
+    business_intent_score = Column(Float, default=0.0)
+    conversion_proximity_score = Column(Float, default=0.0)
+    support_coverage_score = Column(Float, default=0.0)
+    demand_freshness_hours = Column(Float, default=0.0)
+    last_gsc_sync_at = Column(DateTime, nullable=True)
+    cluster_members_json = Column(Text, nullable=True)
+
     # Spoke pages (stored as JSON array of post IDs)
     spoke_page_ids = Column(Text, nullable=True)
     spoke_count = Column(Integer, default=0)
@@ -261,10 +316,19 @@ class TopicCluster(Base, TimestampMixin):
             "id": self.id,
             "cluster_id": self.cluster_id,
             "name": self.cluster_name,
+            "cluster_version": self.cluster_version,
+            "canonical_topic": self.canonical_topic,
             "hub_page_id": self.hub_page_id,
             "hub_url": self.hub_page_url,
             "hub_keyword": self.hub_keyword,
             "intent": self.intent,
+            "intent_band": self.intent_band,
+            "member_count": self.member_count,
+            "business_intent_score": round(self.business_intent_score or 0.0, 3),
+            "conversion_proximity_score": round(self.conversion_proximity_score or 0.0, 3),
+            "support_coverage_score": round(self.support_coverage_score or 0.0, 3),
+            "demand_freshness_hours": round(self.demand_freshness_hours or 0.0, 2),
+            "members": _safe_json_load(self.cluster_members_json),
             "spoke_count": self.spoke_count,
             "total_internal_links": self.total_internal_links,
             "is_active": bool(self.is_active)

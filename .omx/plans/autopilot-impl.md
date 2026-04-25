@@ -1,9 +1,9 @@
 # Autopilot Implementation Plan
 
-1. Clean upstream keyword generation templates and entity extraction.
-2. Add keyword publishability/quality scoring and selection gating.
-3. Add SERP role to routing and SEO context.
-4. Make title generation role-aware and add strict fallback when title-query match fails.
-5. Pass SERP role into planner/writer prompts.
-6. Add publish-time synchronization blocking for non-publishable keywords / title mismatch.
-7. Run targeted regression suite and reviewer validation.
+1. Add a unified GSC runtime resolver and client factory shared by API and scheduler.
+2. Expose `GSC_ENABLED` and readiness diagnostics in the admin config surface.
+3. Add an independent raw GSC sync + opportunity materialization lane with idempotent upsert behavior.
+4. Decouple shadow persistence from `content_generation_job` while keeping baseline fallback.
+5. Add schema-readiness guards before authoritative mode can run.
+6. Extend API/admin visibility for persisted-pool freshness and degraded states.
+7. Verify config parity, credential parity, materialization, rollback, and migration-readiness behavior with targeted tests.

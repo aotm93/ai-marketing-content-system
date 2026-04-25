@@ -3,8 +3,37 @@ from sqlalchemy import inspect
 from src.models.config import SystemConfig
 from src.config.settings import settings
 import logging
+import re
+from typing import List, Optional
 
 logger = logging.getLogger(__name__)
+
+
+def normalize_multiline_entries(value: Optional[str], max_entries: int = 100) -> List[str]:
+    """Normalize pasted textarea config values into deduped, non-empty entries."""
+    normalized: List[str] = []
+    seen = set()
+
+    for raw_line in (value or "").splitlines():
+        line = re.sub(r"\s+", " ", raw_line.strip())
+        if not line:
+            continue
+
+        dedupe_key = line.lower()
+        if dedupe_key in seen:
+            continue
+
+        seen.add(dedupe_key)
+        normalized.append(line)
+        if len(normalized) >= max_entries:
+            break
+
+    return normalized
+
+
+def serialize_multiline_entries(value: Optional[str], max_entries: int = 100) -> str:
+    """Serialize normalized textarea entries back to the stored multiline format."""
+    return "\n".join(normalize_multiline_entries(value, max_entries=max_entries))
 
 def load_settings_from_db(db: Session):
     """Load settings from database and update the global settings object"""

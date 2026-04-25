@@ -11,11 +11,12 @@ Features:
 """
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
-from sqlalchemy import desc, asc, func, and_, or_
+from sqlalchemy import desc, asc, func, or_
 from typing import List, Optional
 from pydantic import BaseModel
-from datetime import datetime, timedelta
+from datetime import datetime
 from enum import Enum
+import json
 
 from src.core.database import get_db
 from src.core.auth import get_current_admin
@@ -32,6 +33,7 @@ class OpportunityTypeEnum(str, Enum):
     POSITION_IMPROVE = "position_improve"
     CONTENT_REFRESH = "content_refresh"
     NEW_PAGE = "new_page"
+    CLUSTER_PRIORITY = "cluster_priority"
 
 
 class OpportunityStatusEnum(str, Enum):
@@ -74,6 +76,20 @@ class OpportunityResponse(BaseModel):
     position: Optional[float] = 0
     ctr: Optional[float] = 0
     potential_traffic: Optional[int] = 0
+    cluster_id: Optional[str] = None
+    cluster_name: Optional[str] = None
+    cluster_version: Optional[str] = None
+    decision_unit_type: Optional[str] = None
+    recommended_action_family: Optional[str] = None
+    recommended_action_confidence: Optional[float] = None
+    score_breakdown: Optional[dict] = None
+    steering_matches: Optional[dict] = None
+    support_role: Optional[str] = None
+    target_asset_type: Optional[str] = None
+    engine_mode: Optional[str] = None
+    engine_version: Optional[str] = None
+    fallback_reason: Optional[str] = None
+    shadow_rank: Optional[int] = None
     created_at: datetime
     executed_at: Optional[datetime] = None
     
@@ -108,6 +124,49 @@ class BulkExecuteRequest(BaseModel):
     opportunity_ids: List[str]
     action: ActionTypeEnum
     params: Optional[dict] = {}
+
+
+def _safe_json_load(value: Optional[str]) -> Optional[dict]:
+    if not value:
+        return None
+    try:
+        return json.loads(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _serialize_opportunity(opp: Opportunity) -> OpportunityResponse:
+    return OpportunityResponse(
+        id=opp.id,
+        opportunity_id=opp.opportunity_id,
+        type=opp.opportunity_type,
+        target_query=opp.target_query,
+        target_page=opp.target_page,
+        score=opp.score or 0,
+        status=opp.status,
+        priority=opp.priority,
+        impressions=opp.current_impressions or 0,
+        clicks=opp.current_clicks or 0,
+        position=opp.current_position or 0,
+        ctr=opp.current_ctr or 0,
+        potential_traffic=opp.potential_clicks or 0,
+        cluster_id=opp.cluster_id,
+        cluster_name=opp.cluster_name,
+        cluster_version=opp.cluster_version,
+        decision_unit_type=opp.decision_unit_type,
+        recommended_action_family=opp.recommended_action_family,
+        recommended_action_confidence=opp.recommended_action_confidence,
+        score_breakdown=_safe_json_load(opp.score_breakdown_json),
+        steering_matches=_safe_json_load(opp.steering_matches_json),
+        support_role=opp.support_role,
+        target_asset_type=opp.target_asset_type,
+        engine_mode=opp.engine_mode,
+        engine_version=opp.engine_version,
+        fallback_reason=opp.fallback_reason,
+        shadow_rank=opp.shadow_rank,
+        created_at=opp.created_at,
+        executed_at=opp.executed_at,
+    )
 
 
 # ==================== Endpoints ====================
@@ -194,7 +253,8 @@ async def list_opportunities(
         query = query.filter(
             or_(
                 Opportunity.target_query.ilike(search_term),
-                Opportunity.target_page.ilike(search_term)
+                Opportunity.target_page.ilike(search_term),
+                Opportunity.cluster_name.ilike(search_term),
             )
         )
         filters_applied["search"] = search
@@ -223,25 +283,7 @@ async def list_opportunities(
     opportunities = query.offset(offset).limit(page_size).all()
     
     return OpportunityListResponse(
-        opportunities=[
-            OpportunityResponse(
-                id=o.id,
-                opportunity_id=o.opportunity_id,
-                type=o.opportunity_type,
-                target_query=o.target_query,
-                target_page=o.target_page,
-                score=o.score or 0,
-                status=o.status,
-                priority=o.priority,
-                impressions=o.current_impressions or 0,
-                clicks=o.current_clicks or 0,
-                position=o.current_position or 0,
-                ctr=o.current_ctr or 0,
-                potential_traffic=o.potential_clicks or 0,
-                created_at=o.created_at,
-                executed_at=o.executed_at
-            ) for o in opportunities
-        ],
+        opportunities=[_serialize_opportunity(o) for o in opportunities],
         total=total,
         page=page,
         page_size=page_size,
@@ -311,23 +353,7 @@ async def get_opportunity(
     
     return {
         "status": "success",
-        "opportunity": OpportunityResponse(
-            id=opp.id,
-            opportunity_id=opp.opportunity_id,
-            type=opp.opportunity_type,
-            target_query=opp.target_query,
-            target_page=opp.target_page,
-            score=opp.score or 0,
-            status=opp.status,
-            priority=opp.priority,
-            impressions=opp.current_impressions or 0,
-            clicks=opp.current_clicks or 0,
-            position=opp.current_position or 0,
-            ctr=opp.current_ctr or 0,
-            potential_traffic=opp.potential_clicks or 0,
-            created_at=opp.created_at,
-            executed_at=opp.executed_at
-        ).model_dump()
+        "opportunity": _serialize_opportunity(opp).model_dump()
     }
 
 
@@ -456,7 +482,8 @@ async def get_opportunity_types():
             {"value": "ctr_optimize", "label": "CTR Optimize", "description": "Low CTR despite good position"},
             {"value": "position_improve", "label": "Position Improve", "description": "Good impressions, position can improve"},
             {"value": "content_refresh", "label": "Content Refresh", "description": "Existing content needs update"},
-            {"value": "new_page", "label": "New Page", "description": "Opportunity for new pSEO page"}
+            {"value": "new_page", "label": "New Page", "description": "Opportunity for new pSEO page"},
+            {"value": "cluster_priority", "label": "Cluster Priority", "description": "GSC demand-cluster recommendation with action selection"}
         ]
     }
 

@@ -1,0 +1,198 @@
+{
+  "active": false,
+  "current_phase": "crystallized",
+  "state": {
+    "interview_id": "7dc23d23-b5aa-41ea-9914-5ee3ccbb102a",
+    "profile": "standard",
+    "type": "brownfield",
+    "initial_idea": "Upgrade and refactor the production SEO system so content and link generation are prioritized from Google Search Console high-impression keywords and related pages instead of treating GSC as only one content source.",
+    "rounds": [
+      {
+        "round": 1,
+        "target": "intent",
+        "question": "If this upgrade can only move one result in the next 90 days, which matters most?",
+        "answer": "Priority is inquiry/conversion growth. Traffic growth matters, but only traffic from customer-value keywords and pages that produce qualified leads and conversions.",
+        "scores_after": {
+          "intent": 0.75,
+          "outcome": 0.65,
+          "scope": 0.2,
+          "constraints": 0.25,
+          "success": 0.35,
+          "context": 0.55
+        },
+        "ambiguity_after": 0.515,
+        "notes": [
+          "Primary KPI is not generic traffic.",
+          "Traffic is valuable only when tied to customer-value inquiry and conversion intent."
+        ]
+      },
+      {
+        "round": 2,
+        "target": "non_goals",
+        "question": "Which keyword/page types should V1 explicitly avoid chasing?",
+        "answer": "Informational, tutorial, and science/popular-education style terms should not be the focus.",
+        "scores_after": {
+          "intent": 0.78,
+          "outcome": 0.7,
+          "scope": 0.45,
+          "constraints": 0.3,
+          "success": 0.35,
+          "context": 0.55
+        },
+        "ambiguity_after": 0.415,
+        "notes": [
+          "Explicit non-goals now include informational, tutorial, and general educational demand.",
+          "Boundary is still unresolved for mixed-intent keywords that look informational but assist conversion."
+        ]
+      },
+      {
+        "round": 3,
+        "target": "decision_boundaries",
+        "question": "If a keyword looks informational/tutorial-like but historically assists inquiry or RFQ, how should V1 treat it?",
+        "answer": "It can be included, but only as a supporting page for a conversion-driving page; it must not become the primary objective on its own.",
+        "scores_after": {
+          "intent": 0.8,
+          "outcome": 0.72,
+          "scope": 0.6,
+          "constraints": 0.35,
+          "success": 0.4,
+          "context": 0.55
+        },
+        "ambiguity_after": 0.395,
+        "notes": [
+          "Decision boundary clarified: informational-looking demand may exist in V1 only as supporting assets for conversion pages.",
+          "Primary objective remains conversion-driving keywords/pages, not general educational traffic."
+        ]
+      },
+      {
+        "round": 4,
+        "target": "success_criteria",
+        "question": "What should be V1's first-priority signal for identifying high customer-value keywords/pages?",
+        "answer": "Commercial page-intent signals should be the primary signal, such as pricing, manufacturer, supplier, wholesale, MOQ, custom, and quote-oriented terms.",
+        "scores_after": {
+          "intent": 0.82,
+          "outcome": 0.76,
+          "scope": 0.62,
+          "constraints": 0.42,
+          "success": 0.58,
+          "context": 0.55
+        },
+        "ambiguity_after": 0.354,
+        "notes": [
+          "V1 should prioritize commercial-intent lexical/page signals over generic traffic signals.",
+          "A hidden assumption remains: lexical commercial intent is a better first filter than direct conversion evidence or mixed scoring."
+        ]
+      },
+      {
+        "round": 5,
+        "target": "constraints",
+        "question": "If a query lacks explicit commercial modifiers but maps to a conversion-capable page, how should V1 judge it?",
+        "answer": "A mixed scoring model is better. The system should evaluate keywords/pages using multiple signals together rather than relying on keyword commercial wording alone.",
+        "scores_after": {
+          "intent": 0.84,
+          "outcome": 0.8,
+          "scope": 0.7,
+          "constraints": 0.55,
+          "success": 0.72,
+          "context": 0.55
+        },
+        "ambiguity_after": 0.281,
+        "notes": [
+          "Previous single-signal preference has been revised after an assumption probe.",
+          "Pressure pass completed: the user moved from lexical commercial intent as primary signal to a mixed scoring model.",
+          "Key unresolved item is scoring governance: which signal is a hard gate vs which signals are boosting/tie-break factors."
+        ]
+      },
+      {
+        "round": 6,
+        "target": "decision_boundaries",
+        "question": "If V1 uses mixed scoring, which signal should be the hard gate?",
+        "answer": "No hard gate. Keyword intent, page type, GSC demand, and conversion relevance should be combined in a weighted model.",
+        "scores_after": {
+          "intent": 0.85,
+          "outcome": 0.82,
+          "scope": 0.78,
+          "constraints": 0.65,
+          "success": 0.78,
+          "context": 0.55
+        },
+        "ambiguity_after": 0.237,
+        "notes": [
+          "Decision boundary clarified: V1 should not rely on a single hard gate.",
+          "System should rank candidates using weighted multi-signal prioritization."
+        ]
+      },
+      {
+        "round": 7,
+        "target": "scope",
+        "question": "For a high-impression, high-customer-value keyword/page cluster, what should V1 do first by default?",
+        "answer": "Use a dynamic decision engine that chooses the highest-scoring action among page optimization, internal links, new content, and external links.",
+        "scores_after": {
+          "intent": 0.86,
+          "outcome": 0.84,
+          "scope": 0.84,
+          "constraints": 0.7,
+          "success": 0.8,
+          "context": 0.58
+        },
+        "ambiguity_after": 0.209,
+        "notes": [
+          "Execution should be action-selective, not fixed-sequence.",
+          "A remaining architecture question is the unit of decisioning: query, page, or cluster."
+        ]
+      },
+      {
+        "round": 8,
+        "target": "scope",
+        "question": "What should be the decision unit of the V1 prioritization engine?",
+        "answer": "Use topic/page clusters. Similar queries, target pages, supporting pages, and linking pages should be evaluated as one cluster.",
+        "scores_after": {
+          "intent": 0.88,
+          "outcome": 0.86,
+          "scope": 0.9,
+          "constraints": 0.78,
+          "success": 0.84,
+          "context": 0.72
+        },
+        "ambiguity_after": 0.155,
+        "notes": [
+          "Decision unit clarified as keyword-page cluster, not isolated query or page decisions.",
+          "This supports cluster-level action selection across refresh, CTR, internal links, new supporting pages, and backlinks."
+        ]
+      }
+    ],
+    "current_ambiguity": 0.155,
+    "threshold": 0.2,
+    "max_rounds": 12,
+    "challenge_modes_used": [],
+    "codebase_context": {
+      "brownfield_confirmed": true,
+      "gsc_client": "src/integrations/gsc_client.py",
+      "scheduler": "src/scheduler/jobs.py",
+      "opportunity_model": "src/models/gsc_data.py",
+      "opportunities_api": "src/api/opportunities.py",
+      "content_refresh": "src/agents/content_refresh.py",
+      "internal_linking": "src/agents/internal_link.py",
+      "backlink_discovery": "src/backlink/copilot.py"
+    },
+    "current_stage": "intent-first",
+    "current_focus": "complete",
+    "context_snapshot_path": ".omx/context/gsc-priority-upgrade-20260425T041755Z.md",
+    "readiness_gates": {
+      "non_goals_explicit": true,
+      "decision_boundaries_explicit": true,
+      "pressure_pass_complete": true
+    },
+    "current_scores": {
+      "intent": 0.88,
+      "outcome": 0.86,
+      "scope": 0.9,
+      "constraints": 0.78,
+      "success": 0.84,
+      "context": 0.72
+    },
+    "transcript_path": ".omx/interviews/gsc-priority-upgrade-20260425T041755Z.md",
+    "spec_path": ".omx/specs/deep-interview-gsc-priority-upgrade.md",
+    "completed_at": "2026-04-25T04:17:55Z"
+  }
+}
