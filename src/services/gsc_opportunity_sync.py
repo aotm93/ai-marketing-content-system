@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from hashlib import sha1
 import json
 from typing import Any, Dict, Optional
@@ -97,7 +97,7 @@ def materialize_gsc_opportunities(
     triggered_by: str = "manual",
     now: Optional[datetime] = None,
 ) -> Dict[str, Any]:
-    now = now or datetime.now(UTC)
+    now = now or datetime.now(timezone.utc)
     schema = inspect_gsc_schema(db)
 
     if not getattr(settings, "gsc_opportunity_sync_enabled", True) and not force:

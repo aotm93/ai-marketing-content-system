@@ -1,7 +1,7 @@
 {
   "version": "1.0.0",
-  "lastScanned": 1775280232211,
-  "projectRoot": "c:\\Users\\DJS Tech\\ZenflowProjects\\bobopkgproject",
+  "lastScanned": 1777105468212,
+  "projectRoot": "C:\\Users\\DJS Tech\\ZenflowProjects\\bobopkgproject",
   "techStack": {
     "languages": [
       {
@@ -51,7 +51,7 @@
       "path": "docs",
       "purpose": "Documentation",
       "fileCount": 8,
-      "lastAccessed": 1775280231717,
+      "lastAccessed": 1777105468008,
       "keyFiles": [
         "CODE_REVIEW_FINDINGS.md",
         "CONTENT_GENERATION_IMPROVEMENT.md",
@@ -60,11 +60,20 @@
         "PROJECT_STRUCTURE.md"
       ]
     },
+    "logs": {
+      "path": "logs",
+      "purpose": null,
+      "fileCount": 1,
+      "lastAccessed": 1777105468009,
+      "keyFiles": [
+        "app.log"
+      ]
+    },
     "migrations": {
       "path": "migrations",
       "purpose": "Database migrations",
       "fileCount": 2,
-      "lastAccessed": 1775280231723,
+      "lastAccessed": 1777105468010,
       "keyFiles": [
         "env.py",
         "script.py.mako"
@@ -74,7 +83,7 @@
       "path": "scripts",
       "purpose": "Build/utility scripts",
       "fileCount": 3,
-      "lastAccessed": 1775280231794,
+      "lastAccessed": 1777105468013,
       "keyFiles": [
         "entrypoint.sh",
         "sync_gsc_data.py",
@@ -85,21 +94,21 @@
       "path": "src",
       "purpose": "Source code",
       "fileCount": 0,
-      "lastAccessed": 1775280231847,
+      "lastAccessed": 1777105468044,
       "keyFiles": []
     },
     "static": {
       "path": "static",
       "purpose": "Static files",
       "fileCount": 0,
-      "lastAccessed": 1775280231940,
+      "lastAccessed": 1777105468058,
       "keyFiles": []
     },
     "tests": {
       "path": "tests",
       "purpose": "Test files",
       "fileCount": 1,
-      "lastAccessed": 1775280231993,
+      "lastAccessed": 1777105468065,
       "keyFiles": [
         "__init__.py"
       ]
@@ -108,21 +117,21 @@
       "path": "wordpress",
       "purpose": null,
       "fileCount": 0,
-      "lastAccessed": 1775280232023,
+      "lastAccessed": 1777105468080,
       "keyFiles": []
     },
     "wp-content": {
       "path": "wp-content",
       "purpose": null,
       "fileCount": 0,
-      "lastAccessed": 1775280232096,
+      "lastAccessed": 1777105468092,
       "keyFiles": []
     },
     "src\\api": {
       "path": "src\\api",
       "purpose": "API routes",
       "fileCount": 17,
-      "lastAccessed": 1775280232120,
+      "lastAccessed": 1777105468114,
       "keyFiles": [
         "admin.py",
         "agents.py",
@@ -133,7 +142,7 @@
       "path": "src\\config",
       "purpose": "Configuration files",
       "fileCount": 3,
-      "lastAccessed": 1775280232129,
+      "lastAccessed": 1777105468126,
       "keyFiles": [
         "settings.py",
         "utils.py",
@@ -144,7 +153,7 @@
       "path": "src\\models",
       "purpose": "Data models",
       "fileCount": 17,
-      "lastAccessed": 1775280232143,
+      "lastAccessed": 1777105468142,
       "keyFiles": [
         "agent_execution.py",
         "backlink.py",
@@ -155,14 +164,14 @@
       "path": "tests\\data",
       "purpose": "Data files",
       "fileCount": 0,
-      "lastAccessed": 1775280232148,
+      "lastAccessed": 1777105468167,
       "keyFiles": []
     },
     "tests\\services": {
       "path": "tests\\services",
       "purpose": "Business logic services",
       "fileCount": 1,
-      "lastAccessed": 1775280232150,
+      "lastAccessed": 1777105468182,
       "keyFiles": [
         "test_website_analyzer.py"
       ]
