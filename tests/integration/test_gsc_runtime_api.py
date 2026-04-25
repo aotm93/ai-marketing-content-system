@@ -68,6 +68,9 @@ class FakeGSCClient:
             )
         ][:limit]
 
+    def get_search_analytics(self, start_date, end_date, dimensions=None, row_limit=25000):
+        return self.get_low_hanging_fruits(limit=1)
+
 
 @pytest.fixture()
 def app_client(monkeypatch):
@@ -191,3 +194,44 @@ def test_gsc_dependency_failure_returns_server_error_not_http_200(app_client, mo
 
     assert response.status_code == 500
     assert response.json()["detail"]["error"] == "invalid service account payload"
+
+
+def test_gsc_materialization_falls_back_to_discovery_candidates(app_client, monkeypatch):
+    class DiscoveryFallbackClient(FakeGSCClient):
+        def get_low_hanging_fruits(self, days=28, limit=100):
+            return []
+
+        def get_search_analytics(self, start_date, end_date, dimensions=None, row_limit=25000):
+            return [
+                FakeOpportunityRow(
+                    query="wholesale oil bottles with dropper",
+                    page="https://example.com/collections/oil-bottles",
+                    impressions=31,
+                    clicks=0,
+                    ctr=0.0,
+                    position=101.3,
+                )
+            ]
+
+    settings.gsc_enabled = True
+    settings.gsc_site_url = "sc-domain:example.com"
+    settings.gsc_auth_method = "service_account"
+    settings.gsc_credentials_json = "{\"type\": \"service_account\"}"
+    settings.gsc_credentials_path = None
+    settings.gsc_opportunity_sync_enabled = True
+
+    monkeypatch.setattr("src.services.gsc_runtime.GSCClient", DiscoveryFallbackClient)
+
+    materialize_response = app_client.post(
+        "/api/v1/gsc/materialize-opportunities",
+        json={"days": 7, "limit": 20},
+    )
+    assert materialize_response.status_code == 200
+    assert materialize_response.json()["materialization_strategy"] == "discovery_fallback"
+    assert materialize_response.json()["created"] == 1
+
+    list_response = app_client.get("/api/v1/opportunities/")
+    assert list_response.status_code == 200
+    payload = list_response.json()
+    assert payload["total"] == 1
+    assert payload["opportunities"][0]["type"] == "new_page"
