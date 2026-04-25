@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, inspect
 from sqlalchemy.engine import make_url
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import QueuePool
@@ -37,6 +37,41 @@ def _project_root() -> Path:
     return Path(__file__).resolve().parents[2]
 
 
+def infer_migration_baseline(db_engine) -> str | None:
+    """
+    Infer the last Alembic revision that best matches a legacy schema created
+    via Base.metadata.create_all() without alembic_version tracking.
+    """
+    inspector = inspect(db_engine)
+
+    if inspector.has_table("alembic_version"):
+        return None
+
+    has_table = inspector.has_table
+
+    if has_table("email_subscribers") or has_table("email_sequences") or has_table("email_enrollments"):
+        return "p3_002_email_tables"
+
+    if has_table("backlink_opportunities"):
+        return "p3_001_backlink_opportunities"
+
+    if has_table("gsc_api_usage") or has_table("gsc_quota_status"):
+        return "p1_004_gsc_usage_indexing"
+
+    if has_table("content_actions"):
+        content_action_columns = {column["name"] for column in inspector.get_columns("content_actions")}
+        if {"query", "reason", "metrics_before", "metrics_after"} <= content_action_columns:
+            return "p1_002_content_actions"
+
+    if has_table("gsc_queries") or has_table("opportunities") or has_table("topic_clusters"):
+        return "p1_001_gsc_opportunities"
+
+    if has_table("job_runs") or has_table("content_actions") or has_table("autopilot_runs"):
+        return "p0_001_job_runs"
+
+    return None
+
+
 def run_db_migrations() -> None:
     """Apply Alembic migrations to the configured database."""
     try:
@@ -49,6 +84,15 @@ def run_db_migrations() -> None:
     alembic_cfg = Config(str(project_root / "alembic.ini"))
     alembic_cfg.set_main_option("script_location", str(project_root / "migrations"))
     alembic_cfg.set_main_option("sqlalchemy.url", settings.database_url)
+
+    inferred_baseline = infer_migration_baseline(engine)
+    if inferred_baseline:
+        logger.warning(
+            "Alembic version tracking is missing; stamping inferred legacy baseline %s before upgrade",
+            inferred_baseline,
+        )
+        command.stamp(alembic_cfg, inferred_baseline)
+
     command.upgrade(alembic_cfg, "head")
 
 

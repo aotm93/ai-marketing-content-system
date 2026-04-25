@@ -25,7 +25,7 @@ class IndexingStatus(Base, TimestampMixin):
     # Page identification
     page_url = Column(String(1024), nullable=False, index=True)
     page_slug = Column(String(255), nullable=True)
-    post_id = Column(Integer, nullable=True, index=True)  # WordPress post ID
+    post_id = Column(Integer, nullable=True)  # WordPress post ID
     
     # Submission tracking
     first_submitted_at = Column(DateTime, nullable=True)

@@ -387,6 +387,65 @@ def _hook_type_for_serp_role(serp_role: Optional[str]):
     return mapping.get(serp_role or "", HookType.HOW_TO)
 
 
+async def _build_manual_seo_context(
+    target_keyword: str,
+    *,
+    source: str,
+    website_profile,
+    catalog_context: Dict[str, Any],
+):
+    from src.models.content_intelligence import ContentTopic, HookType
+    from src.models.seo_context import SEOContext, SEOElementStatus
+    from src.services.content.hook_optimizer import HookOptimizer
+
+    hook_optimizer = HookOptimizer()
+    optimized_titles = []
+    best_title = None
+
+    temp_topic = ContentTopic(
+        title=target_keyword,
+        angle=f"search demand analysis for {target_keyword}",
+        hook_type=_hook_type_for_serp_role(catalog_context.get("serp_role")),
+        industry=website_profile.business_type if website_profile else "packaging",
+        target_audience=website_profile.target_audience if website_profile else "b2b_buyers",
+        business_intent=0.7,
+        trend_score=0.6,
+        competition_score=0.5,
+        differentiation_score=0.6,
+        brand_alignment_score=0.7,
+        value_score=0.65,
+    )
+
+    optimized_titles = await hook_optimizer.generate_optimized_titles(
+        temp_topic,
+        count=5,
+        catalog_context=catalog_context,
+    )
+    if optimized_titles:
+        best_title = await hook_optimizer.select_best_title(
+            optimized_titles,
+            strategy="balanced",
+            target_keyword=target_keyword,
+            content_lane=catalog_context.get("content_lane"),
+            serp_role=catalog_context.get("serp_role"),
+        )
+
+    seo_context = SEOContext(
+        content_id=f"{source.lower()}_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{target_keyword[:30]}",
+        source=source,
+        target_keyword=target_keyword,
+        topic_title=target_keyword,
+        selected_title=best_title.title if best_title else target_keyword,
+        optimized_titles=optimized_titles,
+        selected_title_variant=best_title.test_variant if best_title else "A",
+        title_hook_type=best_title.hook_type if best_title else HookType.HOW_TO,
+        title_ctr_estimate=best_title.expected_ctr if best_title else 0.04,
+        status=SEOElementStatus.GENERATED,
+    )
+    _apply_catalog_context_to_seo_context(seo_context, catalog_context)
+    return seo_context
+
+
 def _add_catalog_links(seo_context) -> None:
     """Create internal link opportunities for category, tag, and product pages."""
     if not seo_context:
@@ -1237,6 +1296,38 @@ async def content_generation_job(data: Dict[str, Any]) -> Dict[str, Any]:
         seo_context = None
         selected_topic = None
         priority_gsc_client = None
+        manual_target_keyword = (data.get("target_keyword") or "").strip()
+
+        if manual_target_keyword:
+            manual_catalog_context = _match_catalog_context(manual_target_keyword, website_profile)
+            manual_catalog_context = _route_catalog_context(manual_target_keyword, manual_catalog_context)
+            quality_assessment = _assess_keyword_publishability(
+                manual_target_keyword,
+                website_profile if 'website_profile' in locals() else None,
+                manual_catalog_context,
+            )
+            manual_catalog_context["keyword_quality_score"] = quality_assessment.get("score")
+            manual_catalog_context["keyword_publishable"] = quality_assessment.get("publishable")
+            manual_catalog_context["keyword_rejection_reason"] = quality_assessment.get("reason")
+            if quality_assessment.get("serp_role"):
+                manual_catalog_context["serp_role"] = quality_assessment.get("serp_role")
+
+            if not quality_assessment.get("publishable", True):
+                reason = quality_assessment.get("reason") or "keyword_not_publishable"
+                raise ValueError(f"Manual opportunity keyword '{manual_target_keyword}' rejected: {reason}")
+
+            target_keyword = manual_target_keyword
+            target_context = {
+                "source": "Opportunity Pool",
+                "metric": f"Opportunity ID: {data.get('opportunity_id') or 'manual'}",
+            }
+            seo_context = await _build_manual_seo_context(
+                target_keyword,
+                source="Opportunity",
+                website_profile=website_profile,
+                catalog_context=manual_catalog_context,
+            )
+            logger.info(f"Selected manual opportunity keyword: {target_keyword}")
 
         shadow_requested = bool(
             data.get("cluster_engine_shadow_enabled", settings.cluster_engine_shadow_enabled)

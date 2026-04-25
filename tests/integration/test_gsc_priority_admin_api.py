@@ -1,6 +1,7 @@
 import json
 import os
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from fastapi import FastAPI
@@ -150,3 +151,66 @@ def test_opportunities_api_returns_cluster_priority_fields(app_client):
     assert opportunity["score_breakdown"]["demand"] == 0.72
     assert opportunity["steering_matches"]["reference_keywords"] == ["custom bottles"]
     assert opportunity["engine_mode"] == "shadow"
+
+
+def test_execute_generate_opportunity_runs_real_job_and_persists_result(app_client, monkeypatch):
+    client, session_factory = app_client
+    db = session_factory()
+    try:
+        db.add(
+            Opportunity(
+                opportunity_id="cluster_generate_123",
+                opportunity_type="new_page",
+                target_query="custom bottle supplier",
+                target_page="https://example.com/custom-bottles",
+                score=82.5,
+                confidence=0.81,
+                current_impressions=1200,
+                current_clicks=88,
+                current_ctr=0.031,
+                current_position=6.8,
+                potential_clicks=140,
+                status="pending",
+                priority="high",
+            )
+        )
+        db.commit()
+    finally:
+        db.close()
+
+    async def fake_run_opportunity_job(job_type, job_data):
+        assert job_type == "content_generation"
+        assert job_data["target_keyword"] == "custom bottle supplier"
+        return SimpleNamespace(
+            job_id="job-real-123",
+            status=SimpleNamespace(value="success"),
+            to_dict=lambda: {
+                "job_id": "job-real-123",
+                "job_type": "content_generation",
+                "status": "success",
+                "result_data": {"wordpress_post_id": 321},
+            },
+        )
+
+    monkeypatch.setattr("src.api.opportunities._run_opportunity_job", fake_run_opportunity_job)
+
+    response = client.post(
+        "/api/v1/opportunities/cluster_generate_123/execute",
+        json={"action": "generate", "params": {}},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["job_id"] == "job-real-123"
+    assert payload["result"]["status"] == "success"
+
+    db = session_factory()
+    try:
+        opportunity = db.query(Opportunity).filter(Opportunity.opportunity_id == "cluster_generate_123").first()
+        assert opportunity is not None
+        assert opportunity.status == "completed"
+        assert opportunity.execution_job_id == "job-real-123"
+        assert opportunity.result_status == "success"
+        assert json.loads(opportunity.result_data)["job_id"] == "job-real-123"
+    finally:
+        db.close()

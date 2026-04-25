@@ -186,6 +186,80 @@ def _ensure_opportunity_schema_ready(db: Session) -> None:
     )
 
 
+def _build_opportunity_job_request(opp: Opportunity, action: ActionTypeEnum) -> tuple[str, dict]:
+    if action == ActionTypeEnum.GENERATE:
+        target_keyword = (opp.target_query or "").strip()
+        if not target_keyword:
+            raise HTTPException(
+                status_code=400,
+                detail="Generate action requires target_query on the opportunity",
+            )
+
+        return (
+            "content_generation",
+            {
+                "config": {"auto_publish": False},
+                "target_keyword": target_keyword,
+                "target_page": opp.target_page,
+                "opportunity_id": opp.opportunity_id,
+                "triggered_by": "opportunity_pool",
+            },
+        )
+
+    if action == ActionTypeEnum.OPTIMIZE:
+        if not opp.target_post_id:
+            raise HTTPException(
+                status_code=400,
+                detail="Optimize action requires target_post_id on the opportunity",
+            )
+
+        return (
+            "seo_optimization",
+            {
+                "post_id": opp.target_post_id,
+                "opportunity_id": opp.opportunity_id,
+            },
+        )
+
+    if action == ActionTypeEnum.REFRESH:
+        if not opp.target_post_id:
+            raise HTTPException(
+                status_code=400,
+                detail="Refresh action requires target_post_id on the opportunity",
+            )
+
+        return (
+            "content_refresh",
+            {
+                "post_id": opp.target_post_id,
+                "auto_detect": False,
+                "max_posts": 1,
+                "opportunity_id": opp.opportunity_id,
+            },
+        )
+
+    raise HTTPException(status_code=400, detail=f"Unsupported action: {action.value}")
+
+
+async def _run_opportunity_job(job_type: str, job_data: dict):
+    from src.scheduler import get_job_runner
+    from src.scheduler.jobs import JOB_REGISTRY
+
+    job_func = JOB_REGISTRY.get(job_type)
+    if job_func is None:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Job type '{job_type}' is not registered",
+        )
+
+    job_runner = get_job_runner()
+    return await job_runner.run_now(
+        job_type=job_type,
+        job_func=job_func,
+        job_data=job_data,
+    )
+
+
 # ==================== Endpoints ====================
 
 @router.get("/", response_model=OpportunityListResponse)
@@ -418,32 +492,48 @@ async def execute_opportunity(
     db.commit()
     
     try:
-        result_message = ""
-        
-        if request.action == ActionTypeEnum.GENERATE:
-            # Trigger new content generation
-            # In production, this would queue a job
-            result_message = f"New content generation started for query: {opp.target_query}"
-            
-        elif request.action == ActionTypeEnum.OPTIMIZE:
-            # Trigger CTR optimization
-            result_message = f"CTR optimization started for page: {opp.target_page}"
-            
-        elif request.action == ActionTypeEnum.REFRESH:
-            # Trigger content refresh
-            result_message = f"Content refresh started for page: {opp.target_page}"
-        
+        job_type, job_data = _build_opportunity_job_request(opp, request.action)
+        job_result = await _run_opportunity_job(job_type, job_data)
+
+        opp.execution_job_id = job_result.job_id
+        opp.result_status = job_result.status.value
+        opp.result_data = json.dumps(job_result.to_dict())
+        opp.status = "completed" if job_result.status.value == "success" else "failed"
+        db.commit()
+
+        if job_result.status.value != "success":
+            raise HTTPException(
+                status_code=500,
+                detail={
+                    "message": f"{job_type} failed for opportunity {opportunity_id}",
+                    "job_id": job_result.job_id,
+                    "status": job_result.status.value,
+                    "error": job_result.error_message,
+                    "result": job_result.to_dict(),
+                },
+            )
+
+        result_message = {
+            ActionTypeEnum.GENERATE: f"Content generation completed for query: {opp.target_query}",
+            ActionTypeEnum.OPTIMIZE: f"SEO optimization completed for post: {opp.target_post_id}",
+            ActionTypeEnum.REFRESH: f"Content refresh completed for post: {opp.target_post_id}",
+        }[request.action]
+
         return {
             "status": "success",
             "message": result_message,
             "opportunity_id": opportunity_id,
             "action": request.action.value,
-            "job_id": f"job_{opportunity_id}_{request.action.value}"
+            "job_id": job_result.job_id,
+            "result": job_result.to_dict(),
         }
         
     except Exception as e:
+        db.rollback()
         opp.status = "failed"
         db.commit()
+        if isinstance(e, HTTPException):
+            raise e
         raise HTTPException(status_code=500, detail=str(e))
 
 

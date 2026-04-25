@@ -773,7 +773,7 @@
                     credentials: 'include'
                 });
 
-                if (!response.ok) throw new Error('Failed to load stats');
+                if (!response.ok) throw new Error(await extractApiError(response, 'Failed to load stats'));
 
                 const data = await response.json();
 
@@ -785,6 +785,7 @@
 
             } catch (error) {
                 console.error('Error loading stats:', error);
+                showToast(error.message || 'Failed to load stats', 'error');
             }
         }
 
@@ -798,7 +799,7 @@
                     credentials: 'include'
                 });
 
-                if (!response.ok) throw new Error('Failed to load opportunities');
+                if (!response.ok) throw new Error(await extractApiError(response, 'Failed to load opportunities'));
 
                 const data = await response.json();
 
@@ -810,7 +811,8 @@
 
             } catch (error) {
                 console.error('Error loading opportunities:', error);
-                showToast('Failed to load opportunities', 'error');
+                renderErrorState(error.message || 'Failed to load opportunities');
+                showToast(error.message || 'Failed to load opportunities', 'error');
             } finally {
                 showLoading(false);
             }
@@ -862,6 +864,11 @@
 
             if (!opportunities || opportunities.length === 0) {
                 tbody.innerHTML = '';
+                emptyState.innerHTML = `
+                    <div class="empty-state-icon">📥</div>
+                    <h3>No opportunities found</h3>
+                    <p>Try adjusting your filters or refresh the data</p>
+                `;
                 emptyState.style.display = 'block';
                 return;
             }
@@ -1073,6 +1080,51 @@
             `;
 
             container.innerHTML = html;
+        }
+
+        async function extractApiError(response, fallbackMessage) {
+            try {
+                const payload = await response.json();
+                const detail = payload?.detail ?? payload;
+
+                if (typeof detail === 'string' && detail.trim()) {
+                    return detail;
+                }
+
+                if (detail?.message) {
+                    if (detail?.schema?.missing_columns?.opportunities?.length) {
+                        return `${detail.message} Missing columns: ${detail.schema.missing_columns.opportunities.join(', ')}`;
+                    }
+                    return detail.message;
+                }
+
+                if (detail?.error) {
+                    return `${fallbackMessage}: ${detail.error}`;
+                }
+            } catch (error) {
+                console.debug('Failed to parse API error response:', error);
+            }
+
+            return `${fallbackMessage} (${response.status})`;
+        }
+
+        function renderErrorState(message) {
+            const tbody = document.getElementById('opportunitiesTable');
+            const emptyState = document.getElementById('emptyState');
+
+            tbody.innerHTML = '';
+            document.getElementById('totalCount').textContent = '0';
+            document.getElementById('showingFrom').textContent = '0';
+            document.getElementById('showingTo').textContent = '0';
+            document.getElementById('totalItems').textContent = '0';
+            document.getElementById('paginationButtons').innerHTML = '';
+
+            emptyState.innerHTML = `
+                <div class="empty-state-icon">⚠️</div>
+                <h3>Unable to load opportunities</h3>
+                <p>${escapeHtml(message)}</p>
+            `;
+            emptyState.style.display = 'block';
         }
 
         function goToPage(page) {

@@ -8,6 +8,7 @@ from .backlink import BacklinkOpportunityModel
 from .email import EmailSubscriber
 from .email_sequence import EmailSequence, EmailSequenceStep
 from .email_enrollment import EmailEnrollment
+from .indexing_status import IndexingStatus
 from .content_intelligence import ContentTopicModel, ResearchCacheEntry, APICallLog
 from .seo_context import SEOContext, InternalLinkOpportunity, SEOElementStatus
 
@@ -29,6 +30,7 @@ __all__ = [
     "EmailSequence",
     "EmailSequenceStep",
     "EmailEnrollment",
+    "IndexingStatus",
     "ContentTopicModel",
     "ResearchCacheEntry",
     "APICallLog",
