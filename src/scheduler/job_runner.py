@@ -291,6 +291,10 @@ class JobRunner:
                         job_func(job_data),
                         timeout=self.config.job_timeout_seconds
                     )
+
+                    embedded_error = self._get_embedded_failure_message(result_data)
+                    if embedded_error:
+                        raise RuntimeError(embedded_error)
                     
                     completed_at = datetime.now()
                     duration = (completed_at - started_at).total_seconds()
@@ -349,6 +353,22 @@ class JobRunner:
             error_message=str(last_error),
             error_traceback=traceback.format_exc(),
             retry_count=retry_count - 1
+        )
+
+    @staticmethod
+    def _get_embedded_failure_message(result_data: Any) -> Optional[str]:
+        """Extract failure status from job functions that return status dictionaries."""
+        if not isinstance(result_data, dict):
+            return None
+
+        status = str(result_data.get("status", "")).lower()
+        if status not in {"failed", "error"}:
+            return None
+
+        return (
+            result_data.get("error")
+            or result_data.get("message")
+            or f"Job returned status={status}"
         )
     
     async def run_now(
