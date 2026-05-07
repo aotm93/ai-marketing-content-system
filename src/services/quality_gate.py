@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from collections import Counter
 from difflib import SequenceMatcher
+from src.services.content.content_policy import MAX_TOTAL_INTERNAL_LINKS, count_internal_links
 
 logger = logging.getLogger(__name__)
 
@@ -343,6 +344,7 @@ class EnhancedQualityGate:
             "heading_count": len(re.findall(r'<h[1-6][>\s]', content, re.IGNORECASE)),
             "image_count": len(re.findall(r'<img', content, re.IGNORECASE)),
             "link_count": len(re.findall(r'<a\s', content, re.IGNORECASE)),
+            "internal_link_count": count_internal_links(content),
             "component_scores": scores,
             "catalog_alignment_score": round(catalog_score, 1) if catalog_score is not None else None,
             "lane_alignment_score": round(lane_score, 1) if lane_score is not None else None,
@@ -843,24 +845,22 @@ class EnhancedQualityGate:
                     estimated_fix_time="10 min"
                 ))
         
-        # Internal links check
-        internal_links = len(re.findall(r'<a[^>]+href=["\'][^"\']*["\']', content))
-        if internal_links < 3:
-            score -= 10
+        # Internal links check: relevance and cap matter more than a quota.
+        internal_links = count_internal_links(content)
+        if internal_links > MAX_TOTAL_INTERNAL_LINKS:
+            score -= 15
             issues.append(QualityIssue(
                 issue_id="SEO-004",
                 category=IssueCategory.SEO,
-                severity=IssueSeverity.MEDIUM,
-                title="Insufficient Internal Links",
-                description=f"Only {internal_links} links found",
+                severity=IssueSeverity.HIGH,
+                title="Too Many Internal Links",
+                description=f"{internal_links} internal links found",
                 location="Content body",
                 current_value=f"{internal_links} links",
-                expected_value="3+ internal links",
+                expected_value=f"0-{MAX_TOTAL_INTERNAL_LINKS} relevant internal links",
                 fix_recommendation=(
-                    "Add internal links to related content on your site. "
-                    "Link to: 1) Your pillar/hub page on this topic. "
-                    "2) 2-3 related articles. 3) Relevant product or service pages. "
-                    "Use descriptive anchor text."
+                    "Prune low-value, duplicate, or weakly related internal links. "
+                    "Keep only the most useful category, tag, product, or contextual links."
                 ),
                 auto_fixable=False,
                 estimated_fix_time="10 min"

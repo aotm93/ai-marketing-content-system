@@ -15,6 +15,7 @@ from src.models.content_intelligence import (
 )
 from src.services.content.intent_analyzer import SearchIntentAnalyzer, UserIntent
 from src.services.content.title_matcher import TitleQueryMatcher
+from src.services.content.content_policy import has_generic_procurement_tail, title_quality_penalty
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +32,9 @@ class HookOptimizer:
         "what you need to know",
         "ultimate guide",
         "top picks reviewed",
-        "which is better?"
+        "which is better?",
+        "moq, lead time, supplier",
+        "moq, lead time, and supplier",
     )
 
     # CTR baseline estimates by hook type
@@ -257,6 +260,10 @@ class HookOptimizer:
         rebuilt = self._strip_trailing_connectors(rebuilt)
         if len(rebuilt) > self.MAX_SEO_TITLE_LENGTH:
             rebuilt = self._truncate_title(rebuilt, self.MAX_SEO_TITLE_LENGTH)
+        rebuilt = self._strip_trailing_connectors(rebuilt)
+        if has_generic_procurement_tail(rebuilt):
+            subject = rebuilt.split(":", 1)[0].strip()
+            rebuilt = self._fit_colon_title(subject, "MOQ and Lead Time Risks", keyword)
         return self._strip_trailing_connectors(rebuilt)
 
     def _remove_repeated_tokens(self, text: str) -> str:
@@ -1029,12 +1036,15 @@ class HookOptimizer:
                     effective_ctr *= 0.6
                 if content_lane:
                     effective_ctr *= 1 + self._lane_fit_score(variant.title, content_lane) * 0.12
+                effective_ctr *= title_quality_penalty(variant.title)
                 scored_variants.append((variant, effective_ctr, match_score))
         else:
             scored_variants = [
                 (
                     variant,
-                    variant.expected_ctr * (1 + (self._lane_fit_score(variant.title, content_lane) * 0.12 if content_lane else 0)),
+                    variant.expected_ctr
+                    * (1 + (self._lane_fit_score(variant.title, content_lane) * 0.12 if content_lane else 0))
+                    * title_quality_penalty(variant.title),
                     1.0,
                 )
                 for variant in variants
@@ -1099,7 +1109,7 @@ class HookOptimizer:
         keyword_title = self._keyword_title(target_keyword)
         procurement_titles = {
             "supplier_evaluation": f"{keyword_title}: Supplier Fit, Samples, and Quote Criteria",
-            "procurement_faq": f"{keyword_title}: MOQ, Lead Time, and Buying Questions",
+            "procurement_faq": f"{keyword_title}: Sample Policy, Quote Criteria, and Timing Risks",
         }
         traffic_titles = {
             "material_comparison": f"{keyword_title}: Tradeoffs, Fit, and Selection Criteria",

@@ -1,8 +1,9 @@
 from abc import ABC, abstractmethod
 from typing import List, Dict, Any, Optional
+import asyncio
 import httpx
 import logging
-from openai import OpenAI
+from openai import AsyncOpenAI
 
 logger = logging.getLogger(__name__)
 
@@ -48,15 +49,24 @@ class OpenAICompatibleProvider(AIProviderInterface):
         api_key: str,
         text_model: str,
         image_model: str,
-        name: str = "openai"
+        name: str = "openai",
+        request_timeout: float = 120.0
     ):
         self.base_url = base_url
         self.api_key = api_key
         self.text_model = text_model
         self.image_model = image_model
         self.name = name
-        self.client = OpenAI(api_key=api_key, base_url=base_url)
-        logger.info(f"Initialized {name} provider with base URL: {base_url}")
+        self.request_timeout = request_timeout
+        self.client = AsyncOpenAI(
+            api_key=api_key,
+            base_url=base_url,
+            timeout=request_timeout,
+        )
+        logger.info(
+            f"Initialized {name} provider with base URL: {base_url}, "
+            f"timeout={request_timeout}s"
+        )
 
     async def generate_text(
         self,
@@ -71,12 +81,15 @@ class OpenAICompatibleProvider(AIProviderInterface):
             model = model or self.text_model
             logger.info(f"Generating text with model: {model}")
 
-            response = self.client.chat.completions.create(
-                model=model,
-                messages=[{"role": "user", "content": prompt}],
-                temperature=temperature,
-                max_tokens=max_tokens,
-                **kwargs
+            response = await asyncio.wait_for(
+                self.client.chat.completions.create(
+                    model=model,
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    **kwargs
+                ),
+                timeout=self.request_timeout,
             )
 
             return response.choices[0].message.content
@@ -96,17 +109,21 @@ class OpenAICompatibleProvider(AIProviderInterface):
             model = model or self.image_model
             logger.info(f"Generating image with model: {model}")
 
-            response = self.client.images.generate(
-                model=model,
-                prompt=prompt,
-                size=size,
-                n=1,
-                **kwargs
+            response = await asyncio.wait_for(
+                self.client.images.generate(
+                    model=model,
+                    prompt=prompt,
+                    size=size,
+                    n=1,
+                    **kwargs
+                ),
+                timeout=self.request_timeout,
             )
 
             image_url = response.data[0].url
-            async with httpx.AsyncClient() as client:
+            async with httpx.AsyncClient(timeout=self.request_timeout) as client:
                 img_response = await client.get(image_url)
+                img_response.raise_for_status()
                 return img_response.content
         except Exception as e:
             logger.error(f"Error generating image: {e}")
@@ -116,9 +133,12 @@ class OpenAICompatibleProvider(AIProviderInterface):
         """Get text embeddings"""
         try:
             model = model or "text-embedding-ada-002"
-            response = self.client.embeddings.create(
-                model=model,
-                input=text
+            response = await asyncio.wait_for(
+                self.client.embeddings.create(
+                    model=model,
+                    input=text
+                ),
+                timeout=self.request_timeout,
             )
             return response.data[0].embedding
         except Exception as e:
@@ -135,7 +155,8 @@ class AIProviderFactory:
         base_url: str,
         api_key: str,
         text_model: str,
-        image_model: str
+        image_model: str,
+        request_timeout: float = 120.0
     ) -> AIProviderInterface:
         """Create an AI provider instance"""
         if provider_name in ["openai", "custom", "azure", "yunwu"]:
@@ -144,7 +165,8 @@ class AIProviderFactory:
                 api_key=api_key,
                 text_model=text_model,
                 image_model=image_model,
-                name=provider_name
+                name=provider_name,
+                request_timeout=request_timeout,
             )
         else:
             raise ValueError(f"Unsupported provider: {provider_name}")
@@ -157,5 +179,6 @@ class AIProviderFactory:
             base_url=config["base_url"],
             api_key=config["api_key"],
             text_model=config["models"]["text"],
-            image_model=config["models"]["image"]
+            image_model=config["models"]["image"],
+            request_timeout=float(config.get("request_timeout", 120.0)),
         )

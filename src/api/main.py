@@ -113,6 +113,7 @@ async def lifespan(app: FastAPI):
                 require_word_count=int(settings.require_word_count),
                 max_tokens_per_day=int(settings.max_tokens_per_day) if settings.max_tokens_per_day else 100000,
                 pause_on_errors=int(settings.pause_on_consecutive_errors),
+                job_timeout_seconds=int(settings.job_timeout_seconds),
                 active_hours_start=int(settings.active_hours_start),
                 active_hours_end=int(settings.active_hours_end)
             )

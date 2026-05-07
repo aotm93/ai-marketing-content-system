@@ -67,6 +67,7 @@ class AutopilotConfig:
     # Cost protection
     max_tokens_per_day: int = 100000    # Daily token consumption limit
     pause_on_errors: int = 3            # Pause autopilot after N consecutive errors
+    job_timeout_seconds: int = 600      # Single generation job timeout
     
     # Schedule (cron format)
     active_hours_start: int = 8         # Start hour (0-23)
@@ -116,6 +117,7 @@ class AutopilotConfig:
             max_posts_per_day=self.max_posts_per_day,
             publish_interval_minutes=self.publish_interval_minutes,
             max_concurrent_jobs=self.max_concurrent_agents,
+            job_timeout_seconds=self.job_timeout_seconds,
             max_tokens_per_day=self.max_tokens_per_day,
             auto_publish=self.auto_publish
         )

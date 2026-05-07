@@ -4,6 +4,15 @@ import logging
 from .base_agent import BaseAgent
 from src.services.content.professional_writer import ProfessionalContentWriter
 from src.services.content.intent_analyzer import SearchIntentAnalyzer
+from src.services.content.content_policy import (
+    arbitrate_internal_links,
+    filter_link_opportunities,
+)
+
+try:
+    from src.config import settings
+except Exception:
+    settings = None
 
 logger = logging.getLogger(__name__)
 
@@ -143,6 +152,8 @@ class ContentCreatorAgent(BaseAgent):
         # Add internal links if provided
         if internal_links:
             content = self._integrate_internal_links(content, internal_links)
+
+        content = arbitrate_internal_links(content, site_base_url=getattr(settings, "wordpress_url", None))
 
         await self.publish_event("content_generated", {
             "keyword": keyword,
@@ -408,11 +419,15 @@ Use these as concrete buying or sourcing anchors instead of generic filler:
         
         # Add internal links
         if internal_links:
+            prompt_links = filter_link_opportunities(
+                internal_links,
+                site_base_url=getattr(settings, "wordpress_url", None),
+            )
             prompt += """
 
 ## INTERNAL LINKING OPPORTUNITIES
 """
-            for link in internal_links[:3]:
+            for link in prompt_links[:3]:
                 prompt += f"- Link to: {link.get('target_title', 'N/A')} ({link.get('target_url', 'N/A')})\n"
                 suggestions = link.get('anchor_text_suggestions', [])
                 if suggestions:
@@ -921,8 +936,12 @@ Write the complete article now:
         
         # This is a simple implementation - could be enhanced with NLP for better placement
         import re
-        
-        for link in internal_links[:3]:  # Max 3 internal links
+
+        for link in filter_link_opportunities(
+            internal_links,
+            current_html=content,
+            site_base_url=getattr(settings, "wordpress_url", None),
+        ):
             target_title = link.get('target_title', '')
             target_url = link.get('target_url', '')
             suggestions = link.get('anchor_text_suggestions', [target_title])

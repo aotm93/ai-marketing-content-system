@@ -17,6 +17,7 @@ from difflib import SequenceMatcher
 import re
 
 from src.agents.base_agent import BaseAgent
+from src.services.content.content_policy import MAX_TOTAL_INTERNAL_LINKS, count_internal_links
 # Import KnowledgeBase (soft import to avoid circular dependency issues if any, though none expected)
 try:
     from src.core.rag import KnowledgeBase
@@ -406,12 +407,12 @@ class QualityGateAgent(BaseAgent):
         else:
             issues.append(f"Only {img_count} images (recommend 2+)")
         
-        # Check for internal links
-        link_count = len(re.findall(r'<a\s', content, re.IGNORECASE))
-        if link_count >= 3:
+        # Check internal-link budget; fewer contextual links is valid when relevance is weak.
+        link_count = count_internal_links(content)
+        if link_count <= MAX_TOTAL_INTERNAL_LINKS:
             score += 15
         else:
-            issues.append(f"Only {link_count} links (recommend 3+)")
+            issues.append(f"{link_count} internal links exceeds max {MAX_TOTAL_INTERNAL_LINKS}")
         
         message = "Good content structure"
         if issues:

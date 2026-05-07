@@ -16,6 +16,18 @@ from dataclasses import dataclass
 from bs4 import BeautifulSoup
 
 from .base_agent import BaseAgent
+from src.services.content.content_policy import (
+    MAX_TOTAL_INTERNAL_LINKS,
+    MIN_CONTEXTUAL_LINK_RELEVANCE,
+    arbitrate_internal_links,
+    filter_link_opportunities,
+    is_internal_link,
+)
+
+try:
+    from src.config import settings
+except Exception:
+    settings = None
 
 logger = logging.getLogger(__name__)
 
@@ -80,12 +92,12 @@ class InternalLinkAgent(BaseAgent):
     """
     
     # Link limits
-    MAX_LINKS_PER_PAGE = 100
-    MIN_LINKS_PER_PAGE = 3
-    IDEAL_LINKS_PER_1000_WORDS = 5
+    MAX_LINKS_PER_PAGE = MAX_TOTAL_INTERNAL_LINKS
+    MIN_LINKS_PER_PAGE = 0
+    IDEAL_LINKS_PER_1000_WORDS = MAX_TOTAL_INTERNAL_LINKS
     
     # Relevance thresholds
-    MIN_RELEVANCE_SCORE = 50
+    MIN_RELEVANCE_SCORE = int(MIN_CONTEXTUAL_LINK_RELEVANCE * 100)
     HIGH_RELEVANCE_THRESHOLD = 80
     
     async def execute(self, task: Dict[str, Any]) -> Dict[str, Any]:
@@ -119,6 +131,7 @@ class InternalLinkAgent(BaseAgent):
         source_keyword = task.get("source_keyword", "")
         available_pages = task.get("available_pages", [])
         topic_cluster = task.get("topic_cluster")
+        site_base_url = task.get("site_base_url") or getattr(settings, "wordpress_url", None)
         
         if not source_content:
             return {"status": "error", "error": "Source content required"}
@@ -130,7 +143,7 @@ class InternalLinkAgent(BaseAgent):
         text_content = soup.get_text()
         
         # Extract existing links to avoid duplicates
-        existing_links = self._extract_existing_links(soup)
+        existing_links = self._extract_existing_links(soup, site_base_url)
         
         opportunities = []
         
@@ -150,6 +163,14 @@ class InternalLinkAgent(BaseAgent):
         # Sort by relevance
         opportunities.sort(key=lambda x: x.relevance_score, reverse=True)
         
+        opportunities = filter_link_opportunities(
+            opportunities,
+            current_html=source_content,
+            site_base_url=site_base_url,
+            source_url=source_page,
+            min_relevance=self.MIN_RELEVANCE_SCORE / 100,
+        )
+
         # Limit to reasonable number
         max_new_links = self._calculate_max_links(len(text_content.split()), len(existing_links))
         top_opportunities = opportunities[:max_new_links]
@@ -170,13 +191,13 @@ class InternalLinkAgent(BaseAgent):
             "recommended_links_to_add": len(top_opportunities)
         }
     
-    def _extract_existing_links(self, soup: BeautifulSoup) -> List[str]:
+    def _extract_existing_links(self, soup: BeautifulSoup, site_base_url: str = None) -> List[str]:
         """Extract existing internal links"""
         links = []
         for a in soup.find_all('a', href=True):
             href = a['href']
             # Filter for internal links
-            if not href.startswith('http') or 'yourdomain.com' in href:
+            if is_internal_link(href, site_base_url):
                 links.append(href)
         return links
     
@@ -345,12 +366,12 @@ class InternalLinkAgent(BaseAgent):
         source_lower = source_text.lower()
         keyword_lower = target_keyword.lower()
         
-        score = 50  # Base score
+        score = 0
         
         # Keyword presence
         keyword_count = source_lower.count(keyword_lower)
         if keyword_count > 0:
-            score += min(keyword_count * 10, 30)
+            score += min(45 + keyword_count * 10, 70)
         
         # Title words presence
         title_words = set(target_title.lower().split())
@@ -358,18 +379,14 @@ class InternalLinkAgent(BaseAgent):
         overlap = len(title_words & source_words)
         
         if overlap > 0:
-            score += min(overlap * 5, 20)
+            score += min(overlap * 6, 30)
         
         return min(score, 100)
     
     def _calculate_max_links(self, word_count: int, existing_links: int) -> int:
         """Calculate maximum new links to add"""
-        # Ideal: 5 links per 1000 words
-        ideal_total = max(self.MIN_LINKS_PER_PAGE, int(word_count / 1000 * self.IDEAL_LINKS_PER_1000_WORDS))
-        ideal_total = min(ideal_total, self.MAX_LINKS_PER_PAGE)
-        
-        max_new = max(0, ideal_total - existing_links)
-        return min(max_new, 10)  # Cap at 10 new links per batch
+        max_new = max(0, self.MAX_LINKS_PER_PAGE - existing_links)
+        return min(max_new, self.MAX_LINKS_PER_PAGE)
     
     async def _analyze_cluster_links(self, task: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -389,14 +406,15 @@ class InternalLinkAgent(BaseAgent):
         logger.info(f"Analyzing cluster links: {cluster_id}")
         
         # Analyze each page's linking
-        hub_analysis = self._analyze_page_links(pages_content.get(hub_url, ""), hub_url)
+        site_base_url = cluster.get("site_base_url") or getattr(settings, "wordpress_url", None)
+        hub_analysis = self._analyze_page_links(pages_content.get(hub_url, ""), hub_url, site_base_url)
         
         spoke_analyses = []
         orphan_pages = []
         
         for spoke_url in spoke_urls:
             content = pages_content.get(spoke_url, "")
-            analysis = self._analyze_page_links(content, spoke_url)
+            analysis = self._analyze_page_links(content, spoke_url, site_base_url)
             spoke_analyses.append(analysis)
             
             # Check if orphan (no links to it)
@@ -432,7 +450,7 @@ class InternalLinkAgent(BaseAgent):
             "strategy": strategy.to_dict()
         }
     
-    def _analyze_page_links(self, content: str, page_url: str) -> Dict[str, Any]:
+    def _analyze_page_links(self, content: str, page_url: str, site_base_url: str = None) -> Dict[str, Any]:
         """Analyze links on a single page"""
         if not content:
             return {
@@ -444,8 +462,8 @@ class InternalLinkAgent(BaseAgent):
         soup = BeautifulSoup(content, 'html.parser')
         links = soup.find_all('a', href=True)
         
-        internal_links = [a['href'] for a in links if not a['href'].startswith('http://') or 'yourdomain' in a['href']]
-        external_links = [a['href'] for a in links if a['href'].startswith('http') and 'yourdomain' not in a['href']]
+        internal_links = [a['href'] for a in links if is_internal_link(a['href'], site_base_url)]
+        external_links = [a['href'] for a in links if not is_internal_link(a['href'], site_base_url)]
         
         word_count = len(soup.get_text().split())
         
@@ -472,6 +490,7 @@ class InternalLinkAgent(BaseAgent):
         content = task.get("content", "")
         opportunities = task.get("opportunities", [])
         post_id = task.get("post_id")
+        site_base_url = task.get("site_base_url") or getattr(settings, "wordpress_url", None)
         
         if not content or not opportunities:
             return {"status": "error", "error": "Content and opportunities required"}
@@ -479,7 +498,17 @@ class InternalLinkAgent(BaseAgent):
         soup = BeautifulSoup(content, 'html.parser')
         links_added = 0
         
-        for opp in opportunities[:5]:  # Limit to top 5
+        budgeted_opportunities = filter_link_opportunities(
+            [
+                {**opp, "relevance_score": opp.get("relevance_score", 100)}
+                for opp in opportunities
+            ],
+            current_html=content,
+            site_base_url=site_base_url,
+            min_relevance=self.MIN_RELEVANCE_SCORE / 100,
+        )
+
+        for opp in budgeted_opportunities:
             target_url = opp.get("target_url", "")
             anchor_text = opp.get("anchor_text", "")
             
@@ -501,7 +530,7 @@ class InternalLinkAgent(BaseAgent):
                     links_added += 1
                     break
         
-        updated_content = str(soup)
+        updated_content = arbitrate_internal_links(str(soup), site_base_url=site_base_url)
         
         return {
             "status": "success",

@@ -43,6 +43,7 @@ class AutopilotConfigRequest(BaseModel):
     require_word_count: int = Field(500, ge=100, le=5000)
     max_tokens_per_day: int = Field(100000, ge=1000)
     pause_on_errors: int = Field(3, ge=1, le=10)
+    job_timeout_seconds: int = Field(600, ge=30, le=3600)
     active_hours_start: int = Field(8, ge=0, le=23)
     active_hours_end: int = Field(22, ge=0, le=23)
 
@@ -119,6 +120,12 @@ PARAM_RECOMMENDATIONS = {
         "range": "1-10",
         "description": "连续错误暂停阈值",
         "recommendation": "推荐3-5次。避免持续失败浪费资源。"
+    },
+    "job_timeout_seconds": {
+        "default": 600,
+        "range": "30-3600",
+        "description": "单次内容生成任务超时（秒）",
+        "recommendation": "推荐300-900秒。外部AI长时间无响应时应失败并重试，而不是卡住服务。"
     }
 }
 
@@ -276,6 +283,7 @@ async def get_autopilot_config(admin: dict = Depends(get_current_admin)):
                 "require_word_count": config.require_word_count,
                 "max_tokens_per_day": config.max_tokens_per_day,
                 "pause_on_errors": config.pause_on_errors,
+                "job_timeout_seconds": config.job_timeout_seconds,
                 "active_hours_start": config.active_hours_start,
                 "active_hours_end": config.active_hours_end
             },
@@ -307,6 +315,7 @@ async def update_autopilot_config(
         require_word_count=request.require_word_count,
         max_tokens_per_day=request.max_tokens_per_day,
         pause_on_errors=request.pause_on_errors,
+        job_timeout_seconds=request.job_timeout_seconds,
         active_hours_start=request.active_hours_start,
         active_hours_end=request.active_hours_end
     )

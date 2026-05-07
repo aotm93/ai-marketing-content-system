@@ -371,3 +371,43 @@ class TestHookOptimizer:
 
         assert "quality 100ml white pump explained" in selected.title.lower()
         assert selected.test_variant == "Z"
+
+    @pytest.mark.asyncio
+    async def test_select_best_title_downranks_generic_procurement_tail(self, optimizer):
+        variants = [
+            OptimizedTitle(
+                title="Spray Bottle Wholesale: MOQ, Lead Time, Supplier",
+                hook_type=HookType.DATA,
+                expected_ctr=0.07,
+                rationale="generic procurement labels",
+                test_variant="A",
+            ),
+            OptimizedTitle(
+                title="Spray Bottle Wholesale: Sample Policy, Quote Criteria, and Timing Risks",
+                hook_type=HookType.PROBLEM,
+                expected_ctr=0.064,
+                rationale="specific buyer value",
+                test_variant="B",
+            ),
+        ]
+
+        selected = await optimizer.select_best_title(
+            variants,
+            strategy="ctr",
+            target_keyword="spray bottle wholesale",
+            content_lane="procurement_conversion",
+            serp_role="procurement_faq",
+        )
+
+        assert selected.test_variant == "B"
+        assert "moq, lead time, supplier" not in selected.title.lower()
+
+    def test_strict_procurement_fallback_avoids_generic_triplet(self, optimizer):
+        selected = optimizer._build_strict_fallback_variant(
+            "spray bottle wholesale",
+            content_lane="procurement_conversion",
+            serp_role="procurement_faq",
+        )
+
+        assert "moq, lead time" not in selected.title.lower()
+        assert "quote criteria" in selected.title.lower()

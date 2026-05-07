@@ -1,6 +1,7 @@
 """Integration test for ContentCreatorAgent with ProfessionalContentWriter."""
 
 from src.agents.content_creator import ContentCreatorAgent
+from src.services.content.content_policy import count_internal_links
 
 
 class TestContentCreatorIntegration:
@@ -190,3 +191,50 @@ class TestContentCreatorIntegration:
         assert "serp role: material_comparison" in prompt_lower
         assert "search-entry page" in prompt_lower
         assert "scenario, application fit, comparison, or problem framing" in prompt_lower
+
+    def test_integrate_internal_links_respects_final_budget(self):
+        agent = ContentCreatorAgent()
+        content = """
+        <p><a href="/category/spray-bottles">Spray Bottles</a></p>
+        <p><a href="/tag/pet">PET</a></p>
+        <p><a href="/product/a">Product A</a></p>
+        <p><a href="/product/b">Product B</a></p>
+        <p>The neck finish guide helps buyers validate closures.</p>
+        <p>The filling guide helps buyers avoid leakage.</p>
+        """
+        links = [
+            {
+                "target_url": "/blog/neck-finish-guide",
+                "target_title": "Neck Finish Guide",
+                "anchor_text_suggestions": ["neck finish guide"],
+                "relevance_score": 0.95,
+            },
+            {
+                "target_url": "/blog/filling-guide",
+                "target_title": "Filling Guide",
+                "anchor_text_suggestions": ["filling guide"],
+                "relevance_score": 0.93,
+            },
+        ]
+
+        updated = agent._integrate_internal_links(content, links)
+
+        assert count_internal_links(updated, "https://example.com") == 5
+        assert "/blog/neck-finish-guide" in updated
+        assert "/blog/filling-guide" not in updated
+
+    def test_integrate_internal_links_skips_weak_opportunities(self):
+        agent = ContentCreatorAgent()
+        content = "<p>The generic guide is mentioned here.</p>"
+        links = [
+            {
+                "target_url": "/blog/generic-guide",
+                "target_title": "Generic Guide",
+                "anchor_text_suggestions": ["generic guide"],
+                "relevance_score": 0.2,
+            }
+        ]
+
+        updated = agent._integrate_internal_links(content, links)
+
+        assert count_internal_links(updated, "https://example.com") == 0

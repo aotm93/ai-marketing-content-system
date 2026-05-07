@@ -195,3 +195,26 @@ class TestCatalogAwareQualityGate:
         assert any("procurement-conversion meta description lacks buying intent signals" in title for title in titles)
         assert any("procurement-conversion page lacks a conversion cta" in title for title in titles)
         assert diagnostic.metrics["lane_alignment_score"] < 70
+
+    @pytest.mark.asyncio
+    async def test_seo_gate_allows_zero_internal_links_without_quota_penalty(self):
+        service = EnhancedQualityGate()
+
+        score, issues = service._analyze_seo(
+            "<h1>Spray Bottle Selection</h1><p>spray bottle wholesale guidance with clear sourcing criteria.</p>",
+            "spray bottle wholesale",
+        )
+
+        titles = [issue.title for issue in issues]
+        assert "Insufficient Internal Links" not in titles
+        assert all("internal" not in title.lower() for title in titles)
+
+    @pytest.mark.asyncio
+    async def test_seo_gate_flags_too_many_internal_links_but_ignores_external_references(self):
+        service = EnhancedQualityGate()
+        links = "".join(f'<a href="/blog/{i}">Internal {i}</a>' for i in range(6))
+        content = f"<p>spray bottle wholesale {links}<a href='https://source.example/report'>Source</a></p>"
+
+        _, issues = service._analyze_seo(content, "spray bottle wholesale")
+
+        assert any(issue.title == "Too Many Internal Links" for issue in issues)

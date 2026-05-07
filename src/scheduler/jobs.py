@@ -18,6 +18,13 @@ from src.integrations import WordPressAdapter
 from src.integrations.publisher_adapter import PublishableContent, PublishStatus
 from src.services.gsc_opportunity_sync import materialize_gsc_opportunities
 from src.services.gsc_runtime import get_gsc_client_or_none, get_gsc_readiness
+from src.services.content.content_policy import (
+    MAX_TOTAL_INTERNAL_LINKS,
+    arbitrate_internal_links,
+    count_internal_links,
+    filter_link_opportunities,
+    remaining_internal_link_budget,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -1136,6 +1143,11 @@ def _append_procurement_next_step_block(content_html: str, seo_context) -> str:
     return content_html.rstrip() + "\n\n" + next_step_block
 
 
+def _arbitrate_generated_content(content_html: str) -> str:
+    """Apply final internal-link budget before quality scoring or publishing."""
+    return arbitrate_internal_links(content_html, site_base_url=settings.wordpress_url)
+
+
 async def _generate_meta_payload(
     seo_context,
     target_keyword: str,
@@ -2158,6 +2170,7 @@ async def content_generation_job(data: Dict[str, Any]) -> Dict[str, Any]:
             if content_result.get("status") == "success":
                 content_html = content_result.get("content", "")
                 content_html = _append_procurement_next_step_block(content_html, seo_context)
+                content_html = _arbitrate_generated_content(content_html)
                 seo_context.content_html = content_html
                 seo_context.content_word_count = len(content_html.split())
                 logger.info(f"Content generated: {seo_context.content_word_count} words")
@@ -2223,6 +2236,7 @@ async def content_generation_job(data: Dict[str, Any]) -> Dict[str, Any]:
             content_html = await ai_provider.generate_text(article_prompt, temperature=0.7, max_tokens=3500)
             if seo_context:
                 content_html = _append_procurement_next_step_block(content_html, seo_context)
+            content_html = _arbitrate_generated_content(content_html)
 
         # --- Layer 4.2: Meta generation before publish-readiness scoring ---
         current_year = datetime.now().year
@@ -2326,6 +2340,9 @@ async def content_generation_job(data: Dict[str, Any]) -> Dict[str, Any]:
         # --- Layer 5: Publishing ---
         # Use content from SEOContext if available, otherwise from legacy generation
         final_content = seo_context.content_html if seo_context and seo_context.content_html else content_html
+        final_content = _arbitrate_generated_content(final_content)
+        if seo_context:
+            seo_context.content_html = final_content
         final_title = meta_data.get("title", target_keyword)
         
         # Validate synchronization before publishing
@@ -2807,8 +2824,9 @@ async def internal_linking_job(data: Dict[str, Any]) -> Dict[str, Any]:
                 current_title = post.get("title", {}).get("rendered", "")
                 
                 # Skip if already has many internal links
-                existing_link_count = current_content.lower().count('href="' + settings.wordpress_url.lower())
-                if existing_link_count >= 5:
+                existing_link_count = count_internal_links(current_content, settings.wordpress_url)
+                remaining_budget = remaining_internal_link_budget(existing_link_count)
+                if remaining_budget <= 0:
                     result["processed_posts"].append({
                         "post_id": target_post_id,
                         "status": "skipped",
@@ -2840,7 +2858,7 @@ async def internal_linking_job(data: Dict[str, Any]) -> Dict[str, Any]:
                 {available_posts}
                 
                 **Instructions**:
-                1. Find {max_links_to_add} natural spots in the content to add internal links
+                1. Find {min(max_links_to_add, remaining_budget, MAX_TOTAL_INTERNAL_LINKS)} natural spots in the content to add internal links
                 2. Choose semantically relevant target pages
                 3. Select anchor text that exists in the content
                 
@@ -2872,7 +2890,19 @@ async def internal_linking_job(data: Dict[str, Any]) -> Dict[str, Any]:
                 enhanced_content = current_content
                 links_added = 0
                 
-                for link_info in links_to_add[:max_links_to_add]:
+                budgeted_links = filter_link_opportunities(
+                    [
+                        {
+                            **link_info,
+                            "relevance_score": link_info.get("relevance_score", 0.8),
+                        }
+                        for link_info in links_to_add
+                    ],
+                    current_html=current_content,
+                    site_base_url=settings.wordpress_url,
+                )[: min(max_links_to_add, remaining_budget, MAX_TOTAL_INTERNAL_LINKS)]
+
+                for link_info in budgeted_links:
                     anchor = link_info.get("anchor_text", "")
                     target_url = link_info.get("target_url", "")
                     
@@ -2881,6 +2911,8 @@ async def internal_linking_job(data: Dict[str, Any]) -> Dict[str, Any]:
                         link_html = f'<a href="{target_url}">{anchor}</a>'
                         enhanced_content = enhanced_content.replace(anchor, link_html, 1)
                         links_added += 1
+
+                enhanced_content = arbitrate_internal_links(enhanced_content, site_base_url=settings.wordpress_url)
                 
                 if links_added > 0:
                     # Update post
@@ -2892,7 +2924,7 @@ async def internal_linking_job(data: Dict[str, Any]) -> Dict[str, Any]:
                         "title": current_title,
                         "status": "success",
                         "links_added": links_added,
-                        "link_details": links_to_add[:links_added]
+                        "link_details": budgeted_links[:links_added]
                     })
                 else:
                     result["processed_posts"].append({
